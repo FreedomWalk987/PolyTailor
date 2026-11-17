@@ -1,0 +1,37 @@
+schema_version = "1.0.0"
+
+id = "polytailor"
+version = "1.0.4"
+name = "PolyTailor"
+tagline = "Retopology and mesh building: build, fill and relax quads"
+maintainer = "FreedomWalk"
+type = "add-on"
+website = "https://github.com/FreedomWalk987/PolyTailor"
+
+tags = ["Mesh", "Modeling"]
+
+blender_version_min = "4.5.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2011-2023 Blender Foundation (LoopTools Relax portions)",
+  "2026 FreedomWalk",
+  "2008-2023 Joris van Rantwijk and NetworkX Developers (blossom matching design, core/newfill/matching.py)",
+  "1997-2025 C. Geuzaine and J.-F. Remacle; tables by contributor M. Reberol (Gmsh quad cavity pattern tables, core/patterns/chords.py)",
+]
+
+[permissions]
+files = "Defaults, icon cache, auto-saves and debug log"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  ".*",
+  "/dev/",
+  "/docs/",
+  "*.orig",
+  "*.rej",
+  "*.zip",
+]
