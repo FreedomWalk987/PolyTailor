@@ -1,11 +1,10 @@
 # Roadmap
 
-Planned areas of work:
+PolyTailor is under active development. Current focus:
 
-- Fill quality on retopology surfaces, following the sharp edges of the source mesh
+- Better Fill results on retopology surfaces
 - A clearer Fill progress display
-- Smoother drag building in Quad mode
-- Edit Mode Auto-Save improvements
-- A redesigned sidebar panel
-- Better performance on large meshes
-- Testing on Linux and macOS
+- Smoother building and editing tools
+- Performance and stability
+
+Ideas and bug reports are welcome in [Issues](../../issues).

@@ -8,3 +8,14 @@ Detailed documentation is in preparation.
 - Requires Blender 4.5 or newer. Tested on Windows.
 - License: GPL-3.0-or-later.
 - Source code is in [`source/`](source). See the [changelog](CHANGELOG.md) and [roadmap](ROADMAP.md).
+
+## What's next
+
+PolyTailor is under active development. Current focus:
+
+- Better Fill results on retopology surfaces
+- A clearer Fill progress display
+- Smoother building and editing tools
+- Performance and stability
+
+Ideas and bug reports are welcome in [Issues](../../issues).
