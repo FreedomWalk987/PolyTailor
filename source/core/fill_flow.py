@@ -214,7 +214,7 @@ def _global_parts(p, faces, neighbors, opposite, internal, boundary, q, shape, a
     return dict(S=score, raw_U=m['minQ']*.7**m['poles'])
 
 
-RANK_DELTA = 3.0   # Legacy rank R1: the band is every plan within RANK_DELTA of the best S*
+RANK_DELTA = 3.0   # main-search rank R1: the band is every plan within RANK_DELTA of the best S*
 RANK_MINQ_GUARD = .005   # rule (a): today's pick stays when the new one's minQ is lower by more than this
 
 
@@ -233,7 +233,7 @@ def band_key_before(plan):
 
 def r1_band(plans, floor=.20):
     """(band, pool): pool = the eligible plans (all if none is); band = those with S* within RANK_DELTA
-    of the pool's best S* (study rule R1). Plans whose metrics fail are left out."""
+    of the pool's best S* (the default rule). Plans whose metrics fail are left out."""
     pool = []
     for p in plans:
         try:
@@ -263,8 +263,8 @@ def score(plan):
 
 
 def guarded_choice(candidates, reference, floor=.20):
-    """The R1 pick; when R1 has none (multi-panel plans, nothing eligible), the fallback: feasibility, then
-    global S, the density guard, and the PS-1 ranking that may replace that pick."""
+    """The default-rule pick; when it has none (multi-panel plans, nothing eligible), the fallback: feasibility, then
+    global S, the density guard, and the feature ranking that may replace that pick."""
     try:
         chosen = r1_choice(candidates, reference, floor)
         if chosen is not None:
@@ -272,7 +272,7 @@ def guarded_choice(candidates, reference, floor=.20):
     except Exception:   # never lose the released choice
         pass
     chosen = _s_choice(candidates, reference, floor)
-    if chosen is not None:   # density guard; PS-1 then starts from the guarded pick
+    if chosen is not None:   # density guard; the feature ranking then starts from the guarded pick
         try:
             chosen = density_guard(candidates, reference, chosen, floor)
         except Exception:
@@ -314,13 +314,13 @@ def density_guard(candidates, reference, chosen, floor=.20):
     return min((p for p in better if round(score(p), 12) == best), key=fingerprint)
 
 
-# PS-1 ranking, with guards (the fallback when the R1 pick has no eligible plan)
-# that keep the current (S) choice. Thresholds and evidence: CHANGELOG 2.2.7.
-PS1_FACE_RATIO = 1.5    # PS-1 pick may not have more than 1.5x the faces of the current pick
-PS1_FACE_FLOOR = .7     # (Preferences "PS-1: Face-count floor"): PS-1 pick may not have under 0.7x the faces
-PS1_FLOW_GUARD = True   # PS-1 pick may not be (nearly) flow-flagged when the current pick is not flagged
-PS1_FLOW_LIMIT = .95    # Fl2 of the PS-1 pick that counts as nearly flagged (random_irregular_convex_0915: .997)
-PS1_MINQ_DROP = .10     # PS-1 pick may not have a minQ more than this below the current pick
+# Feature ranking, with guards (the fallback when the default rule has no eligible plan)
+# that keep the current (S) choice.
+PS1_FACE_RATIO = 1.5    # its pick may not have more than 1.5x the faces of the current pick
+PS1_FACE_FLOOR = .7     # its pick may not have under 0.7x the faces
+PS1_FLOW_GUARD = True   # its pick may not be (nearly) flow-flagged when the current pick is not flagged
+PS1_FLOW_LIMIT = .95    # Fl2 of its pick that counts as nearly flagged
+PS1_MINQ_DROP = .10     # its pick may not have a minQ more than this below the current pick
 
 
 def ps1_features(plan):
@@ -366,16 +366,16 @@ def ps1_choice(candidates, reference, current, floor=.20):
     return result
 
 
-# R1 ranking rule (checked by an offline replay of the candidates).
+# Default ranking rule.
 # The default is the eligible candidate with the
 # highest minQ * 0.7^(interior poles + rim singularities). An interior pole is a non-rim vertex whose valence is
 # not 4; a rim singularity is a rim vertex whose face count differs from its interior angle / 90 deg by more than
-# R1_RIM_TOL (Cubit End/Side/Corner/Reversal classes). R1 replaces S, the density
-# guard, PS-1 and the PS-1 guards for the default pick.
-# C: when the R1 pick has minQ < 0.3, the best R1 candidate with
-# minQ >= 0.3 replaces it, unless it has more than R1_GATE_CAP more singularities (curved_band_006: +14).
-# ties of U go to the higher S, then to a scale-free position key (was the fingerprint, which changed
-# with the model size); a rim slot without faces (an unused odd-rim split point) is not a singularity.
+# R1_RIM_TOL (Cubit End/Side/Corner/Reversal classes). It replaces S, the density
+# guard and the feature ranking with its guards for the default pick.
+# When the default pick has minQ < 0.3, the best default-rule candidate with
+# minQ >= 0.3 replaces it, unless it has more than R1_GATE_CAP more singularities.
+# ties of U go to the higher S, then to a scale-free position key (the same order at any
+# model size); a rim slot without faces (an unused odd-rim split point) is not a singularity.
 R1_POLE_BASE = .7
 R1_RIM_TOL = .65
 R1_SJ_GATE = .3
@@ -438,7 +438,7 @@ def r1_key(plan):
 
 
 def r1_choice(candidates, reference, floor=.20):
-    """R1 default; None (use the S/PS-1 stack) for multi-panel plans or when nothing is eligible."""
+    """The default rule's pick; None (use the S / feature-ranking stack) for multi-panel plans or when nothing is eligible."""
     options = list(candidates)
     if reference is not None and not any(p is reference for p in options):
         options.append(reference)

@@ -3,10 +3,10 @@
 """Public release identity."""
 
 NAME = "PolyTailor"
-VERSION = "1.0.4"
+VERSION = "1.1.0-s4b6"
 
 
 def version_label():
-    """Preferences header, e.g. "Version 1.0.4"."""
+    """Preferences header: "Version" and the version number."""
     from .i18n import tr as iface_   # add-on context first
     return iface_("Version {version}").format(version=VERSION)   # the public version

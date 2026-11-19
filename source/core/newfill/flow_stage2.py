@@ -82,7 +82,7 @@ def smooth(mesh, sweeps=50, lam=0.5, deadline_s=None, halvings=4, cancel=None):
             out[js] = ((np.cross(a, b) @ nrm) / np.maximum(np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2), 1e-30)).min(1)
         return out
     s0 = csj(P)
-    if float(np.median(s0)) < 0:   # fix: a clockwise mesh (the S lane's) flips the SJ sign -> no floor at all
+    if float(np.median(s0)) < 0:   # fix: a clockwise mesh (the S part's) flips the SJ sign -> no floor at all
         nrm = -nrm
         s0 = csj(P)
     floor = float(s0.min())

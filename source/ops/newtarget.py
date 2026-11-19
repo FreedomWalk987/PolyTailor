@@ -3,7 +3,7 @@
 """Object Mode: create an empty retopology mesh and jump straight into Build."""
 
 import bpy
-from ..i18n import tr   # reports in the add-on context
+from ..i18n import tr_rpt   # reports in the add-on context
 
 from .. import session
 from ..ui.pie import icon
@@ -22,9 +22,9 @@ def _target_collection(context):
 
 class PPO_OT_new_target(bpy.types.Operator):
     bl_idname = "ppo.new_target"
-    bl_label = "New Retopology Mesh"
+    bl_label = "New PolyTailor Mesh"
     bl_translation_context = "Poly Toolset"
-    bl_description = "Create an empty mesh object for retopology, enter Edit Mode and start Build"
+    bl_description = "Add an empty mesh and start Build: in 3D mode at the 3D Cursor, or in Topo mode on the active object"
     bl_options = {"REGISTER"}   # one explicit undo step (pushed in execute); no redo panel
 
     location: bpy.props.EnumProperty(translation_context="Poly Toolset", 
@@ -44,10 +44,10 @@ class PPO_OT_new_target(bpy.types.Operator):
     def execute(self, context):
         source = context.view_layer.objects.active if self.location == "ACTIVE" else None
         if self.location == "ACTIVE" and source is None:
-            self.report({"WARNING"}, tr("No active object"))
+            self.report({"WARNING"}, tr_rpt("No active object"))
             return {"CANCELLED"}
 
-        name = f"{source.name}_retopo" if source else "Retopology"
+        name = f"{source.name}_retopo" if source else "Mesh"   # New Mesh: Blender's own default name
         target = _target_collection(context)   # validated before any data is created (no orphans)
         mesh = bpy.data.meshes.new(name)
         obj = bpy.data.objects.new(name, mesh)
@@ -68,20 +68,25 @@ class PPO_OT_new_target(bpy.types.Operator):
         obj.select_set(True)
         context.view_layer.objects.active = obj
 
-        # the new mesh is empty; no seed vertex (2.2.12-2.6.3 added one at the 3D Cursor)
+        # the new mesh is empty (no seed vertex)
         mesh.update()
 
         bpy.ops.object.mode_set(mode="EDIT")
         # an empty mesh gets an explicit Edit Mode undo step, so the first Ctrl+Z after the first Build vertex
-        # returns to the empty mesh (2.6.3 got this from its seed vertex) instead of undoing the object
+        # returns to the empty mesh instead of undoing the object
         try:
-            bpy.ops.ed.undo_push(message="New Retopology Mesh")
+            bpy.ops.ed.undo_push(message="New Mesh" if self.location == "CURSOR" else "Retopology Mesh")
         except RuntimeError:
             pass
         try:
             bpy.ops.wm.tool_set_by_id(name="ppo.polypen")
         except RuntimeError:
             pass  # tool switch needs a 3D View; the mesh is still created
+        session.sync()   # first: the first entry in a scene applies the saved defaults (they include 3D / Topo)
+        from .. import props
+        settings = props.settings(context)
+        # Sidebar > Sources is left as it is: with none set, Topo snaps to every visible object (core.raycast)
+        settings.pen3d = self.location == "CURSOR"   # New Mesh: 3D mode; Retopology Mesh: Topo mode
         session.sync()
         return {"FINISHED"}
 
@@ -91,9 +96,9 @@ def draw_add_menu(self, context):
     layout = self.layout
     layout.separator()
     layout.operator_context = "EXEC_DEFAULT"
-    layout.operator("ppo.new_target", text="Retopology at Cursor", text_ctxt="Poly Toolset",
+    layout.operator("ppo.new_target", text="New Mesh (3D)", text_ctxt="Poly Toolset",
                     icon_value=icon("polypen")).location = "CURSOR"
-    layout.operator("ppo.new_target", text="Retopology from Active", text_ctxt="Poly Toolset",
+    layout.operator("ppo.new_target", text="Retopology Mesh (Topo)", text_ctxt="Poly Toolset",
                     icon="PIVOT_ACTIVE").location = "ACTIVE"
 
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""Plan-and-realise quad fill used by the A lane (fill_a).
+"""Plan-and-realise quad fill used by the A part (fill_a).
 
 fill(world, budget_s=5.0) -> dict(positions, faces, info)
 
@@ -10,7 +10,7 @@ Pipeline:
   2. Every plan has an exact a-priori upper bound of the selection key (rim SJ bound, #poles, #tolerant mismatches).
      Plans are realised (Tutte -> Winslow -> hinge SJ) in descending bound order; stop when no remaining bound can win.
   3. Key = sj - LAM * poles - MU * mismatches - terrible/strip penalties (no SJ cap).
-  4. dopt v5.1 one FULL pass (adj_min_cap 1.5, edge_min_cap 2.0) on the winner, under the fill's deadline.
+  4. One dopt FULL pass (adj_min_cap 1.5, edge_min_cap 2.0) on the winner, under the fill's deadline.
 Budget: one deadline checked inside the DP per-vertex loop, CG, smoother, optimiser, polish and dopt; when it expires
 after at least one realised candidate, the best one so far is returned (dopt skipped or shortened); with no candidate
 it raises apattern.BudgetExceeded (a FillRefused)."""
@@ -30,29 +30,21 @@ def _drive(gen):
         return done.value
 
 
-def _call_steps(fn, *args, **kwargs):
-    """call fn; when it returns a generator (a *_steps function), step it here."""
-    import inspect
-    out = fn(*args, **kwargs)
-    if inspect.isgenerator(out):
-        out = yield from out
-    return out
-
 FillRefused = A.FillRefused
 BudgetExceeded = A.BudgetExceeded
 
 TB = A.TAU_BASE
-VARIANTS_R2 = ([dict()]                                              # A v2 default (safety net)
+VARIANTS_R2 = ([dict()]                                              # the default variant (safety net)
                + [dict(TB, tau=t) for t in (0.85, 0.75, 0.65, 0.55, 0.45, 0.0)]
                + [dict(TB, tau=t, r_min=168.0) for t in (0.6, 0.45)]  # rim dipole (S + flat R) option
                + [dict(TB, tau=t, wq=1.0) for t in (0.7, 0.5)]
                + [dict(TB, tau=0.7, dfrac=1.0, dwin=99, wd=0.02)]
-               + [dict(r_min=168.0, wm=0.6, wpole=1.0, wT=0.2),                       # A v2's S + flat-R variants
+               + [dict(r_min=168.0, wm=0.6, wpole=1.0, wT=0.2),                       # S + flat-R variants
                   dict(r_min=168.0, wm=1.0, wpole=0.8, wT=0.2, s_min=120.0, sj_lo=0.8, wlow=3.0)])
 ODD_R2 = [dict(TB, tau=t) for t in (0.85, 0.55, 0.0)]
 ODD_PROBE = [dict(TB, tau=0.7)]
 
-# ---------------------------------------------------------------- round 3: bands (isoperimetric quotient Q < 0.6)
+# ---------------------------------------------------------------- bands (isoperimetric quotient Q < 0.6)
 BAND = dict(q=0.6, lam=0.2, noguard=True, max_real=8, post_top=2)
 BAND_EXTRA = ([dict(TB, tau=0.75, wpos=0.02)]                                               # position-follow (density)
               + [dict(TB, tau=0.6, r_min=158.0, wpole=0.6)]                                 # R on 158-200 deg (SJ >= 0.79)
@@ -67,10 +59,7 @@ def is_band(xy):
 RESCUE = [dict(TB, tau=None, r_min=168.0, wpole=0.3), dict(TB, tau=None, r_min=168.0, wpole=-0.5), dict(TB, tau=0.4, r_min=168.0, wpole=0.3)]
 # selection: piecewise-concave SJ utility (steep below t1, unit slope to t2, s3 above) minus pole / mismatch prices.
 # Fitted on logged candidate lists under the constraint 'no more interior irregular vertices than before'.
-# Final round-2 key: A v2's capped shape (SJ above 0.6 counts 40 %) + a hinge below 0.45; pole price 0.33,
-# mismatch price 0.19 (DEV + HELD5 end-to-end runs A_r2d..A_r2g).
-# A_r2j (quality first, poles allowed where they buy quality): concave key, SJ gains below 0.75 count
-# double; pole price 0.25, mismatch price 0.06; at most 4 realisations. Chosen on HELD5 + DEV runs A_r2j_*.
+# Quality first, poles allowed where they buy quality: a concave SJ key; the prices and caps are in CFG.
 CFG = dict(s1=2.0, t1=0.75, t2=1.0, s3=0.0, lam=0.35, mu=0.06, klow=2.0, tlow=0.45, kterr=1.0, kstrip=0.3,
            max_real=4, rescue_sj=0.4)
 
@@ -100,7 +89,7 @@ def _tries(xy):
 
 
 def _batch0_steps(xy, prm):
-    """Cheap safety batch: A v2's default variant (even) or one probe DP per triangle placement (odd)."""
+    """Cheap safety batch: the default variant (even) or one probe DP per triangle placement (odd)."""
     if len(xy) % 2 == 0:   # no relaxed fallback and few retries here: this batch must stay cheap
         return (yield from A.plans_even_steps(xy, dict(prm, _relaxed=True, nogood=2), prm['variants'][:1]))
     out = []
@@ -112,11 +101,6 @@ def _batch0_steps(xy, prm):
                 break
             raise
     return out
-
-
-def _batch0(*args, **kwargs):
-    """_batch0_steps run to its end (the synchronous form)."""
-    return _drive(_batch0_steps(*args, **kwargs))
 
 
 def _batch1_steps(xy, prm, b0):
@@ -142,11 +126,6 @@ def _batch1_steps(xy, prm, b0):
     except BudgetExceeded:
         pass
     return out
-
-
-def _batch1(*args, **kwargs):
-    """_batch1_steps run to its end (the synchronous form)."""
-    return _drive(_batch1_steps(*args, **kwargs))
 
 
 def _rank(plans, cfg):
@@ -235,13 +214,8 @@ def fill_xy_steps(xy, cfg=None, prm=None):
     return pos, F, info
 
 
-def fill_xy(*args, **kwargs):
-    """fill_xy_steps run to its end (the synchronous form)."""
-    return _drive(fill_xy_steps(*args, **kwargs))
-
-
 def _dopt_post_steps(pos, F, n, band=False):
-    """One dopt v5.1 pass (FULL, caps 1.5/2.0) under the fill's own deadline; on expiry dopt returns its best valid stage.
+    """One dopt pass (FULL, caps 1.5/2.0) under the fill's own deadline; on expiry dopt returns its best valid stage.
     Bands: FULL without guards (small thin meshes: the input-derived caps block the corner fix)."""
     left = A.time_left()
     if left is not None and left < 0.03:
@@ -254,21 +228,11 @@ def _dopt_post_steps(pos, F, n, band=False):
     return np.asarray(out, float)[:, :2], 'ok'
 
 
-def _dopt_post(*args, **kwargs):
-    """_dopt_post_steps run to its end (the synchronous form)."""
-    return _drive(_dopt_post_steps(*args, **kwargs))
-
-
 def _untangle_steps(pos, faces, n):
     P3 = np.c_[pos, np.zeros(len(pos))]
     out, info = (yield from dopt.optimize_steps(P3, [list(f) for f in faces], n, preset='FAST', guards=False,
                               deadline=A.deadline, cancel=A.cancelled, on_budget='best'))
     return np.asarray(out, float)[:, :2] if info.get('ok', False) else pos
-
-
-def _untangle(*args, **kwargs):
-    """_untangle_steps run to its end (the synchronous form)."""
-    return _drive(_untangle_steps(*args, **kwargs))
 
 
 def fill_steps(world, budget_s=5.0, cfg=None, cancel=None):
@@ -281,7 +245,7 @@ def fill_steps(world, budget_s=5.0, cfg=None, cancel=None):
         band = is_band(xy)
         cfg2 = dict(cfg or {})
         prm0 = {}
-        if band:      # round 3: band-only plans and price (non-band behaviour = A_r2j_p035)
+        if band:      # bands: band-only plans and price (other outlines unchanged)
             cfg2.setdefault('lam', BAND['lam'])
             cfg2.setdefault('max_real', BAND['max_real'])
             cfg2.setdefault('post_top', BAND['post_top'])
@@ -295,7 +259,7 @@ def fill_steps(world, budget_s=5.0, cfg=None, cancel=None):
                 pos2, faces, info = (yield from fill_xy_steps(xy, cfg2, dict(prm0, untangle=_untangle_steps)))
             except BudgetExceeded:
                 raise
-            except FillRefused:     # last resort: A v2's own driver (cost variants + relaxed set + untangle)
+            except FillRefused:     # last resort: apattern's own driver (cost variants + relaxed set + untangle)
                 pos2, faces, info = (yield from A.fill_xy_steps(xy, dict(untangle=_untangle_steps)))
                 info = dict(info, fallback='A_v2')
         n = len(world)

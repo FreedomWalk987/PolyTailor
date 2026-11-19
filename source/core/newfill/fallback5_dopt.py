@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""fallback v5 + dopt FAST polish (guards=False), with a time budget.
+"""fallback5 + dopt FAST polish (guards=False), with a time budget.
 fill(world, budget_s=None) -> dict(positions, faces). Raises FillRefused when no valid mesh is found or the budget
 runs out. The dopt polish is skipped when less than ~15% of the budget remains, and is kept only if the strict
 validation still passes and min SJ does not drop. NumPy and Python only."""

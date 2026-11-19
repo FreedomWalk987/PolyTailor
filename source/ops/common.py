@@ -4,7 +4,7 @@
 
 import time
 import bpy
-from ..i18n import tr   # reports in the add-on context
+from ..i18n import tr_rpt   # reports in the add-on context
 from ..core import safe_mesh
 
 
@@ -79,7 +79,7 @@ _END_TEARDOWN = {"ppo.fill", "ppo.polypen"}   # tools whose own _end (header, jo
 
 def release_all():
     """tear down every running PolyTailor modal (draw handlers, timers, BMesh refs) before unregister.
-    and cancel every New-engine run in progress (its lane jobs stop at their next check); stop its worker processes."""
+    and cancel every second-search run in progress (its jobs stop at their next check); stop its worker processes."""
     for op in list(_LIVE):
         try:
             _release(op, bpy.context)
@@ -317,12 +317,12 @@ def _guard_check(op, context, guard):
     foreign_ran = op.__dict__.pop("_ppo_foreign_ran", False)
     if guard.mesh_changed(context):
         if not can_refresh:
-            return tr("The mesh being edited changed; the tool stopped")
+            return tr_rpt("The mesh being edited changed; the tool stopped")
         refresh(context)
         op._ppo_guard = safe_mesh.MeshStateGuard(context)
         return None
     if foreign_ran and refresh is None:
-        return tr("Another tool is editing this mesh; stopped and kept the changes")
+        return tr_rpt("Another tool is editing this mesh; stopped and kept the changes")
     if foreign_ran and can_refresh:
         refresh(context)
         op._ppo_guard = safe_mesh.MeshStateGuard(context)
@@ -350,7 +350,7 @@ def _wrap_event(func):
                     from ..core import raycast
                     if (guarded or opname == "ppo.slide") and not raycast._invertible(obj):
                         _release(self, context)   # positions cannot be mapped to and from this object
-                        self.report({"WARNING"}, tr("This object's transform has a zero scale; fix the scale of the object or its parents"))
+                        self.report({"WARNING"}, tr_rpt("This object's transform has a zero scale; fix the scale of the object or its parents"))
                         return {"CANCELLED"}
                 allowed = ()
                 if opname == "ppo.slide":   # Move hands over to Slide while still on the stack
@@ -358,13 +358,13 @@ def _wrap_event(func):
                                     if getattr(o, "bl_idname", "") == "PPO_OT_move")
                 if (guarded or opname == "ppo.slide") and safe_mesh.foreign_modal_running(context, self, allowed):
                     _release(self, context)
-                    self.report({"WARNING"}, tr("Another tool is editing this mesh; finish it first"))
+                    self.report({"WARNING"}, tr_rpt("Another tool is editing this mesh; finish it first"))
                     return {"CANCELLED"}
             elif func.__name__ == "modal":
                 self.__dict__["_ppo_unchecked"] = True   # until this event's guard checks pass
                 if not _target_valid(self, context):
                     _abort(self, context, restore=False)
-                    self.report({"WARNING"}, tr("The mesh being edited changed; the tool stopped"))
+                    self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
                     return {"CANCELLED"}
                 guard = getattr(self, "_ppo_guard", None)
                 if guard is not None:
@@ -374,7 +374,7 @@ def _wrap_event(func):
                         self.__dict__["_ppo_foreign_ran"] = True
                         if event.type == "WINDOW_DEACTIVATE" or (event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS"):
                             _abort(self, context, restore=False)
-                            self.report({"WARNING"}, tr("Another tool is editing this mesh; stopped and kept the changes"))
+                            self.report({"WARNING"}, tr_rpt("Another tool is editing this mesh; stopped and kept the changes"))
                             return {"CANCELLED"}
                         if opname in {"ppo.polypen", "ppo.fill"} and not getattr(self, "placing", None) and event.type in {"LEFT_CTRL", "RIGHT_CTRL"} and event.value == "RELEASE":
                             end = getattr(self, "_end", None)   # the operator's own teardown (header, job)
@@ -435,7 +435,7 @@ def _wrap_execute(func):
         try:
             if _opname(self) in {"ppo.pin", "ppo.glue"} and safe_mesh.foreign_modal_running(context, self):
                 _release(self, context)
-                self.report({"WARNING"}, tr("Another tool is editing this mesh; finish it first"))
+                self.report({"WARNING"}, tr_rpt("Another tool is editing this mesh; finish it first"))
                 return {"CANCELLED"}
             result = func(self, context)
         except Exception:

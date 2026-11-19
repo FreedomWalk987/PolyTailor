@@ -16,7 +16,7 @@ from mathutils import Vector
 
 from .. import prefs, props
 from ..core import axis as axis_utils, pick, raycast, safe_mesh, snap, units
-from ..i18n import tr
+from ..i18n import tr_rpt
 from ..core.mesh import merge_moved
 from .brush import MirrorClip
 
@@ -176,7 +176,7 @@ class PPO_OT_drag(bpy.types.Operator):
     def modal(self, context, event):
         if self.journal.stale():   # a vertex Drag wrote changed under it: stop, no rollback
             self._end(context)
-            self.report({"WARNING"}, tr("The mesh being edited changed; the tool stopped"))
+            self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         if event.type in {"X", "Y", "Z"} and event.value == "PRESS":
             self.axis = None if self.axis == event.type else event.type
@@ -192,7 +192,7 @@ class PPO_OT_drag(bpy.types.Operator):
                 "ESC", "RIGHTMOUSE"}):
             # stale handles never scramble outside edits; per-vertex check in _restore
             if not safe_mesh.restore_allowed(self, context) or self._restore():
-                self.report({"WARNING"}, tr("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             self._end(context)
             return {"CANCELLED"}
         return {"RUNNING_MODAL"}

@@ -1,12 +1,13 @@
 schema_version = "1.0.0"
 
 id = "polytailor"
-version = "1.0.4"
+version = "1.1.0-s4b6"
 name = "PolyTailor"
 tagline = "Retopology and mesh building: build, fill and relax quads"
 maintainer = "FreedomWalk"
 type = "add-on"
 website = "https://github.com/FreedomWalk987/PolyTailor"
+support = "https://github.com/FreedomWalk987/PolyTailor/issues"
 
 tags = ["Mesh", "Modeling"]
 
@@ -23,7 +24,7 @@ copyright = [
 ]
 
 [permissions]
-files = "Defaults, icon cache, auto-saves and debug log"
+files = "Defaults, icon cache and debug log"
 
 [build]
 paths_exclude_pattern = [

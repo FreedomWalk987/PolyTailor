@@ -1,3 +1,12 @@
+## 1.0.5
+
+- Fill: the HUD shows whether you are in 3D or Topo mode, and the search indicator is on the left.
+- Fill: a second search for a better fill now shows in its own strip below the HUD, so the main result looks finished; when it finds one, the strip says "Better result found".
+- Shift+A > Mesh: New Mesh (3D) adds an empty mesh named "Mesh" at the 3D Cursor and starts in 3D mode; Retopology Mesh (Topo) adds one on the active object and starts in Topo mode with that object as the source.
+- Edit Mode Auto-Save is removed.
+- Fixed: when you step through the results of a wider search, the Fill HUD marks the one shown; Build no longer collapses a triangle when its new tip lands on the triangle's own corner.
+- Stability fixes.
+
 ## 1.0.4
 
 - Fill: a fill is drawn in the viewport as soon as it can be added, and Ctrl+click adds only a fill that has been shown.

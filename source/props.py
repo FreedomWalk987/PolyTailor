@@ -29,8 +29,6 @@ class PPO_RelaxBrushSettings(bpy.types.PropertyGroup):
                            default=1, min=0, max=1, subtype="FACTOR")
 
 
-MERGE3_VALUE = 5          # saved numeric value of 3in1 since 2.1 (unchanged)
-LEGACY_QUAD_VALUE = 0     # removed Quad mode: migrates to 3in1 with Quad faces
 FACES_CONTEXT = "Poly Toolset Faces"
 
 
@@ -95,8 +93,6 @@ class PPO_SceneSettings(bpy.types.PropertyGroup):
     # Retopology overlay shading chosen by hand, the same way (default: on in Topo, off in 3D)
     retopo_manual_3d: IntProperty(options={"HIDDEN"}, default=-1, min=-1, max=1)
     retopo_manual_topo: IntProperty(options={"HIDDEN"}, default=-1, min=-1, max=1)
-    face_attributes_initialized: BoolProperty(options={"HIDDEN"}, default=False)
-    face_attributes_default_off: BoolProperty(options={"HIDDEN"}, default=False)
     defaults_applied: BoolProperty(options={"HIDDEN"}, default=False)  # see defaults.apply_scene
     merge_radius: IntProperty(translation_context="Poly Toolset", name="Merge Radius", description="Auto Merge radius in screen pixels",
                               default=10, min=1, max=60, subtype="PIXEL")
@@ -133,20 +129,6 @@ class PPO_SceneSettings(bpy.types.PropertyGroup):
             ("EXCLUDE", "Lock", "Boundary vertices stay in place", "LOCKED", 2),
         ),
         default="INCLUDE",
-    )
-    # 3in1 is the only Build mode. The separate Tri/Quad, Curve Pen, Quad and
-    # Triangle modes were removed from the interface; the internal insert modes stay
-    # (3in1 uses them, see ops/polypen.PolyPenState.insert_mode). The property is kept
-    # so scripts and older files keep working: it always reads "MERGE3" and setting it
-    # does nothing. Saved numbers of the old modes are migrated the first time PolyTailor
-    # reads the scene (settings() below), never at file load.
-    polypen_mode: EnumProperty(translation_context="Poly Toolset", 
-        name="Build Mode",
-        description="Build mode",
-        items=(
-            ("MERGE3", "3in1", "The only Build mode (kept for scripts)", "MESH_GRID", MERGE3_VALUE),
-        ),
-        get=lambda self: MERGE3_VALUE, set=lambda self, value: None,
     )
     build_stroke_density: FloatProperty(translation_context="Poly Toolset", 
         name="Stroke Density", default=4.0, min=0.01, max=1000.0, precision=1,
@@ -224,10 +206,6 @@ def begin_pen3d(scene, merge=None, clamp=None):
     """Save Topo settings once before entering 3D mode, including initial entry."""
     settings, ts = scene.ppo, scene.tool_settings
     ready = settings.pen3d_backup_ready
-    is_set = getattr(settings, "is_property_set", lambda name: False)
-    if not ready and not is_set("pen3d_backup_ready"):
-        # Preserve backups already saved by the earlier single-toggle UI.
-        ready = any(is_set(name) for name in ("pen3d_prev_snap", "pen3d_prev_merge", "pen3d_prev_clamp"))
     if not ready:
         settings.pen3d_prev_snap = ts.use_snap
         settings.pen3d_prev_merge = ts.use_mesh_automerge if merge is None else merge
@@ -261,78 +239,9 @@ def _clamp_changed(context):
         sync_native_clamp(context)
 
 
-def migrate_build_mode(settings):
-    """Old files store the removed modes as numbers (Quad 0, Tri/Quad 1, Curve Pen 2,
-    Vertex 3, Triangle 4, 3in1 5). All become 3in1; Quad keeps quads-only faces."""
-    raw = settings.get("polypen_mode")
-    if raw is None:
-        return False
-    if raw == LEGACY_QUAD_VALUE and settings.get("merge3_faces") is None:
-        settings.merge3_faces = "QUAD"
-    del settings["polypen_mode"]
-    return True
-
-
-_pending = set()   # session_uid of the scenes read while writes may not be allowed (a UI draw)
-_failed = set()    # session_uid of the scenes whose migration failed: never queued again (no re-defer loop)
-
-
-def forget_migrations():
-    """a file load: the closing file's queue and failures are dropped."""
-    _pending.clear()
-    _failed.clear()
-
-
-def _defer(scene):
-    _pending.add(scene.session_uid)
-    if not bpy.app.timers.is_registered(_migrate_pending):
-        bpy.app.timers.register(_migrate_pending, first_interval=0.0)
-
-
-def _migrate_pending():
-    """One-shot (never repeats): migrate the scenes PolyTailor has read, then redraw the 3D views."""
-    uids = set(_pending)
-    _pending.clear()
-    done = False
-    for scene in getattr(bpy.data, "scenes", None) or ():
-        if scene.session_uid in uids:
-            try:
-                done = migrate_build_mode(scene.ppo) or done
-            except Exception as exc:   # one scene's failure never skips the others; it is not queued again
-                _failed.add(scene.session_uid)
-                print("PolyTailor:", exc)
-    if done:
-        wm = getattr(bpy.context, "window_manager", None)
-        for window in (wm.windows if wm else ()):
-            for area in (window.screen.areas if window.screen else ()):
-                if area.type == "VIEW_3D":
-                    area.tag_redraw()
-    return None
-
-
-def migrate_scene(scene):
-    """Migrate one scene now, from a context that may write (a PolyTailor operator starting, see
-    session.ensure). Where Blender refuses the write it is left to the one-shot above."""
-    if scene is None or scene.session_uid in _failed or scene.ppo.get("polypen_mode") is None:
-        return False
-    try:
-        return migrate_build_mode(scene.ppo)
-    except (AttributeError, RuntimeError, TypeError):
-        _defer(scene)
-        return False
-
-
 def settings(context=None):
-    """The scene's PolyTailor settings: every PolyTailor panel, tool and operator reads them here. A scene
-    holding an old Build mode is migrated the first time PolyTailor reads it, never at file load, so a
-    scene PolyTailor never uses is left as it was saved. The reader may be drawing (no ID writes there):
-    the write runs right after, from a one-shot timer."""
-    scene = (context or bpy.context).scene
-    settings = scene.ppo
-    if (settings.get("polypen_mode") is not None and scene.session_uid not in _pending
-            and scene.session_uid not in _failed):
-        _defer(scene)
-    return settings
+    """The scene's PolyTailor settings: every PolyTailor panel, tool and operator reads them here."""
+    return (context or bpy.context).scene.ppo
 
 
 _classes = (PPO_BrushSettings, PPO_RelaxBrushSettings, PPO_SceneSettings)
@@ -342,13 +251,9 @@ def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.ppo = PointerProperty(type=PPO_SceneSettings)
-    # No scene is changed at enable or at file load: see settings() / migrate_scene().
 
 
 def unregister():
-    if bpy.app.timers.is_registered(_migrate_pending):
-        bpy.app.timers.unregister(_migrate_pending)
-    forget_migrations()
     del bpy.types.Scene.ppo
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

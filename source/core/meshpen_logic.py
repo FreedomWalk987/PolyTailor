@@ -89,12 +89,12 @@ def segment_closest(p, a, b):
     return a + ab * _clamp(ab.dot(p - a) / n2, 0.0, 1.0)
 
 
-NEAR_EDGES_MIN = 32       # B-1: at most this many selected edges keep the plain per-edge loops
+NEAR_EDGES_MIN = 32       # at most this many selected edges keep the plain per-edge loops
 _PROJECTION_ERROR = 4e-6  # relative rounding bound of the single-precision projection (about 30x the real one)
 
 
 class SelectedEdgeScreen:
-    """B-1: the end points of a fixed list of edges (object space), read into one numpy array once.
+    """The end points of a fixed list of edges (object space), read into one numpy array once.
 
     bounds() narrows candidates down only: for a screen point p it gives each edge's screen distance in double
     precision and a margin that bounds the difference to the distance the exact code computes in single precision
@@ -174,7 +174,7 @@ class SelectedEdgeScreen:
 
 
 class QuadRings:
-    """B-1: components of the relation "edge -> the opposite edge of a quad it is on" (over all quads, no other
+    """Components of the relation "edge -> the opposite edge of a quad it is on" (over all quads, no other
     condition), found from the selected edges on demand and kept per selection snapshot, with each component's quads
     (the quads that have an edge in it) and their centres and squared corner radii (numpy).
 
@@ -486,18 +486,18 @@ def crossings(context, mw, start, a, b):
             if nxt is None:
                 break
             v = nxt
-        queue = list(v.link_faces)
+        pending = list(v.link_faces)
         done = set(start.link_edges)
     else:
-        queue = list(start.link_faces)
+        pending = list(start.link_faces)
         done = {start}
         found.append((start, a))
-    front = [f for f in queue if faces_viewer(context, mw, f)]
+    front = [f for f in pending if faces_viewer(context, mw, f)]
     if front:
-        queue = front
+        pending = front
         walk = lambda faces: [f for f in faces if faces_viewer(context, mw, f)]
-    while queue:
-        face = queue.pop(0)
+    while pending:
+        face = pending.pop(0)
         # Where several edges of the face are crossed (the line through a corner), the
         # first one in set order is taken, as Build always did: its choice in these
         # cases follows the same set order, so this keeps it identical.
@@ -509,7 +509,7 @@ def crossings(context, mw, start, a, b):
                 found.append((edge, hit))
                 beyond = next((f for f in walk(edge.link_faces) if f != face), None)
                 if beyond:
-                    queue.append(beyond)
+                    pending.append(beyond)
                 break
     return found
 
@@ -788,12 +788,79 @@ class BuildStroke:
                 stack.extend(((lo, index), (index, hi)))
         return [points[i].copy() for i in sorted(keep)]
 
+    # cursor backtrack while the stroke is held: moving back along the path cuts the strip back (retract)
+    width = 0.0            # the strip's screen width (px); 0: unknown (retract off)
+    RETRACT_CAPTURE = 0.95  # x width: the cursor this close to an earlier part of the path, moving against it
+    RETRACT_EXCLUDE = 1.0   # x width of arc right behind the tip that never captures (a curve's own end)
+
     def append(self, xy, final=False):
         xy = Vector(xy)
+        if self.width > 0:
+            if getattr(self, "_emptied", False) and len(self.raw) == 1 and \
+                    (xy - self.raw[0]).length < self.RETRACT_CAPTURE * self.width:
+                return False   # retracted to the start: stays empty (release adds nothing)
+            if final and self._release_jitter(xy):
+                return False   # a tiny pull-back while letting go: the tip stays
+            if self._retract(xy, final):
+                return True
+        return self._append_plain(xy, final)
+
+    def _append_plain(self, xy, final):
         if (xy - self.raw[-1]).length >= (0.01 if final else self.dead_zone):
             self.raw.append(xy)
+            self._tip = xy.copy()
+            self._reach = max(getattr(self, "_reach", 0.0), (xy - self.raw[0]).length)   # farthest from the start
             return True
         return False
+
+    def _retract(self, xy, final):
+        """cut the path back to the nearest earlier point the cursor returns to while moving against the path."""
+        raw = self.raw
+        if len(raw) < 2:
+            return False
+        width = self.width
+        move = xy - raw[-1]
+        if move.length < (0.01 if final else self.dead_zone):
+            return False
+        arc = [0.0] * len(raw)   # arc length from the tip backward, per sample
+        for k in range(len(raw) - 2, -1, -1):
+            arc[k] = arc[k + 1] + (raw[k + 1] - raw[k]).length
+        best = None
+        for k in range(len(raw) - 1):
+            if arc[k + 1] < self.RETRACT_EXCLUDE * width and k + 1 != len(raw) - 1:
+                continue
+            a, b = raw[k], raw[k + 1]
+            ab = b - a
+            if ab.length_squared < 1e-12:
+                continue
+            t = _clamp((xy - a).dot(ab) / ab.length_squared, 0, 1)
+            q = a + ab * t
+            if arc[k] - t * ab.length < self.RETRACT_EXCLUDE * width and move.dot(ab) >= 0:
+                continue
+            dist = (xy - q).length
+            if best is None or dist < best[0]:
+                best = (dist, k, q, ab)
+        if best is None or best[0] > self.RETRACT_CAPTURE * width or move.dot(best[3]) >= 0:
+            return False
+        _, k, q, _ = best
+        del raw[k + 1:]
+        far = getattr(self, "_reach", 0.0) > 1.5 * width   # a stroke that once reached far cancels near its start
+        near = self.RETRACT_CAPTURE * width if far else max(2 * self.dead_zone, 0.2 * width)
+        if (q - raw[0]).length < near:   # cut back to the start: no stroke
+            del raw[1:]
+            self._emptied = True
+        elif (q - raw[-1]).length > 0.01:
+            raw.append(q)
+        self._tip = raw[-1].copy()
+        return True
+
+    def _release_jitter(self, xy):
+        """a backward move shorter than the dwell dead zone (the hand settling as the button is released)."""
+        raw = self.raw
+        if len(raw) < 2:
+            return False
+        move = xy - raw[-1]
+        return move.length < self.dead_zone and move.dot(raw[-1] - raw[-2]) < 0
 
     def collapsed(self):
         """The raw samples with dwell clusters collapsed (see DEAD_ZONE): a cluster
@@ -1047,19 +1114,6 @@ def relieve_strip(rows, centers, project=None):
 
 CHAIN_MAX = 256       # chain vertices accepted for a row strip
 CELL_BUDGET = 8000    # rows x (K-1) cells in one preview
-
-
-def edge_component(edge, edges):
-    """The selected edges connected to `edge` (through shared vertices)."""
-    found, stack = {edge}, [edge]
-    while stack:
-        current = stack.pop()
-        for vert in current.verts:
-            for other in vert.link_edges:
-                if other in edges and other not in found:
-                    found.add(other)
-                    stack.append(other)
-    return found
 
 
 def chain_from_edges(edges):
@@ -1342,8 +1396,6 @@ def strip_overlaps(rows_screen):
 class MeshPenLogic:
     """Decides and performs Build insertions (interface used by ops/polypen.py)."""
 
-    vertex_curve_pen = False   # set by the 3in1 (Beta) Build mode only
-
     def __init__(self, context, event):
         self.mw = context.edit_object.matrix_world
         self.mi = self.mw.inverted()
@@ -1391,8 +1443,8 @@ class MeshPenLogic:
             self.face_lookup = _FaceLookup(self.bm, cache)
         if self.selected is None:
             self.selected = self._selection()
-        # 3in1 (Beta) only: Tri/Quad with one selected vertex behaves as Curve Pen.
-        if self.vertex_curve_pen and insert_mode in ("TRI/QUAD", "QUAD-ONLY") and len(self.selected[BMVert]) == 1:
+        # Tri/Quad or quads only with one selected vertex: a curve stroke from it
+        if insert_mode in ("TRI/QUAD", "QUAD-ONLY") and len(self.selected[BMVert]) == 1:
             self.insert_mode = "EDGE-ONLY"
             self.quad_preserve = False
 
@@ -1443,6 +1495,8 @@ class MeshPenLogic:
         elif action == Action.WIRE_VERT_SPLIT_FACE:
             wire, face = wire_face_to(self.bmv, hv)
             return split_lists(face, wire + [hv]) is None
+        elif action == Action.TRI_QUAD and hv:   # the tip on the triangle's own corner would collapse it
+            return self.bmf is not None and hv in self.bmf.verts
         return False
 
     def _choose(self, context):
@@ -1498,7 +1552,7 @@ class MeshPenLogic:
         return self._decide_edge_modes(context)
 
     def _near_cache(self):
-        """B-1: SelectedEdgeScreen of the selected edges, kept as long as this selection snapshot."""
+        """SelectedEdgeScreen of the selected edges, kept as long as this selection snapshot."""
         cached = getattr(self, "_near", None)
         if cached is None or cached[0] is not self.selected:
             screen = SelectedEdgeScreen(self.selected[BMEdge])
@@ -1511,7 +1565,7 @@ class MeshPenLogic:
         return self._near[2]
 
     def selected_chain(self, edge):
-        """B-1: (size, chain_from_edges(edge_component(edge, selected edges)), or None for a single edge), kept per
+        """(size, chain_from_edges(the selected edges connected to edge), or None for a single edge), kept per
         selection snapshot for every edge walked (the selection and the mesh do not change while it is kept).
         The walk stops at the first vertex with 3 or more selected edges: chain_from_edges returns (None, "BRANCHED")
         for any component with such a vertex, so a hover near a large selected area does not walk all of it; the
@@ -1537,14 +1591,14 @@ class MeshPenLogic:
                             stack.append(other)
             if branched:
                 found = (max(2, len(component)), (None, "BRANCHED"))
-            else:   # the whole component (edge_component's set)
+            else:   # the whole connected component
                 found = (len(component), chain_from_edges(component) if len(component) > 1 else None)
             for other in component:
                 cached[1][other] = found
         return found
 
     def near_selected_edges(self, persmat, mw, width, height, p, limit):
-        """B-1: the selected edges (selection order) whose segment can be within limit px of p on screen
+        """The selected edges (selection order) whose segment can be within limit px of p on screen
         (persmat, mw, width, height: the projection the caller's exact check uses)."""
         edges = self.selected[BMEdge]
         if len(edges) <= NEAR_EDGES_MIN:
@@ -1556,7 +1610,7 @@ class MeshPenLogic:
 
     def _nearest_selected_edge(self, context, edges):
         if edges is self.selected[BMEdge] and len(edges) > NEAR_EDGES_MIN:
-            # B-1: only edges that can be the nearest (same set order, so ties resolve as before)
+            # only edges that can be the nearest (same set order, so ties resolve as before)
             edges = self._near_cache().nearest_candidates(*self._projection(context), self._screen(context, self.hit),
                                                           EDGE_END_SHARE, 1.0 - EDGE_END_SHARE)
         return min(edges, key=lambda e: self._edge_screen_distance(context, e, self.hit))
@@ -1598,7 +1652,7 @@ class MeshPenLogic:
             p2, p3 = self._screen(context, a), self._screen(context, b)
             _p2, _p3, a, b = orient_far_side(p0, p1, p2, p3, a, b)
             self.far_verts = []
-            # an end on an existing vertex uses it: unselected and shown, the hover rule (B-2: never a hidden one)
+            # an end on an existing vertex uses it: unselected and shown, the hover rule (never a hidden one)
             usable = lambda v: not v.select and not is_bmvert_hidden(context, v)
             for co in (a, b):
                 self.vert_lookup.find(context, self.mw, co, keep=usable)
@@ -1703,7 +1757,7 @@ class MeshPenLogic:
         return other_vert(far, common_vert(edge, far))
 
     def _loop_cut_starts(self, context, he):
-        """B-1: the start edges of _find_loop_cut in exactly the old order (sorted by screen distance, stable on the
+        """The start edges of _find_loop_cut in exactly the old order (sorted by screen distance, stable on the
         set order), without the starts that provably cannot reach a target face (QuadRings.possible); the distance
         of those starts is never computed."""
         edges = self.selected[BMEdge]
@@ -1733,7 +1787,7 @@ class MeshPenLogic:
     def _find_loop_cut(self, context):
         """Cut across a row of quads from a selected edge toward the mouse (see spec 3.6)."""
         he = self.edge_lookup.bme
-        order = self._loop_cut_starts(context, he)   # B-1: lazy, the same order as sorting every selected edge
+        order = self._loop_cut_starts(context, he)   # lazy, the same order as sorting every selected edge
         target = None
         for start in order:
             came = {}   # face -> edge it was entered by, edge -> face it was reached from
@@ -2051,7 +2105,7 @@ class MeshPenLogic:
             a, b = self.bme.verts
             far = []
             for vert, co in zip(self.far_verts, self.far_cos):
-                if not vert or not vert.is_valid or vert.hide:   # B-2: never weld onto a hidden vertex
+                if not vert or not vert.is_valid or vert.hide:   # never weld onto a hidden vertex
                     vert = bm.verts.new(self._mirror_side(context, co, self.bme.verts))
                     snap.append(vert)
                 far.append(vert)

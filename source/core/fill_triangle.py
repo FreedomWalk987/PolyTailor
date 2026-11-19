@@ -103,7 +103,7 @@ def candidates_steps(world, settings, default, project=None, reference=None):
                 shown[drop] = required
             else:
                 shown.append(required)
-    # the guarded pick is entry 1; the rest follow by S (2.6.1; before: U),
+    # the guarded pick is entry 1; the rest follow by S,
     # best first, with entries below the quality floor last; ties by U; non-finite last.
     from .fill_flow import metrics, eligible
     import math

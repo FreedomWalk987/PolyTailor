@@ -97,7 +97,7 @@ def raycast_point_valid_sources(context, point):
             return hit.world
     if depth is None:
         depth = fallback_depth(context, xy)
-    # Preserve PolyPen_Only's view-plane fallback outside a source surface.
+    # Outside a source surface the point falls back to the view plane.
     return raycast.surface_or_plane(context, xy, depth, sources).world
 
 

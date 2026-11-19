@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""PS-1 feature extraction (numpy only; no scipy).
+"""Feature extraction for the feature ranking (numpy only; no scipy).
 
 TOPOLOGICAL definitions that also work for non-planar (3D) vertices. On planar outlines the
 values equal those of the planar (2D) detectors.
@@ -9,7 +9,7 @@ Inputs everywhere:  positions (n,2|3) array-like, faces = list of vertex-index s
 (quads; triangles tolerated), boundary = derived from edge incidence (edges used by 1 face).
 
 Public:
-    mesh_features(positions, faces) -> dict   (all PS-1 terms; see FEATURE_KEYS)
+    mesh_features(positions, faces) -> dict   (all ranking terms; see FEATURE_KEYS)
     wpct(values, weights, q)                 weighted "lower" percentile used by wp90 terms
 """
 from collections import defaultdict

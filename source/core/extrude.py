@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""PolyPen_Only 2.0.1 extrusion ladders and mitered boundary offsets.
-
-Ported on 2026-09-30; surface queries use the PolyPen_Only core.
+"""Extrusion ladders and mitered boundary offsets for Build; surface queries use the Build support module.
 """
 import bmesh
 from mathutils import Vector

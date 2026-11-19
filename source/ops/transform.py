@@ -4,7 +4,7 @@
 
 import bmesh
 import bpy
-from ..i18n import tr as iface_   # add-on context first
+from ..i18n import tr as iface_, tr_rpt   # add-on context first
 from mathutils import Vector
 
 from .. import props, prefs
@@ -259,7 +259,7 @@ class PPO_OT_move(bpy.types.Operator):
         context.area.header_text_set(None)
         context.area.tag_redraw()
         if kept:
-            self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+            self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
         return not kept
 
     def _outside_edit(self):
@@ -294,7 +294,7 @@ class PPO_OT_move(bpy.types.Operator):
     def modal(self, context, event):
         if self.journal.stale():   # a vertex Move wrote changed under it: stop, no rollback
             self._end(context)
-            self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+            self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
             self.mouse = self.precise.update(event)   # Shift: finer movement
@@ -416,7 +416,7 @@ class PPO_OT_slide(bpy.types.Operator):
                 if (safe_mesh.mesh_stamp(bm) != self.stamp   # + O(n) check
                         or (not getattr(self, "_ppo_internal_rollback", False) and snapshot.outside_changed())
                         or snapshot.restore() is False):
-                    self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                    self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
 
     @staticmethod
     def _native_running(context):
@@ -473,7 +473,7 @@ class PPO_OT_slide(bpy.types.Operator):
                 # the cancelled native slide put the mesh back itself (no restore: nothing to put back); a
                 # difference from the invoke stamp is not ours to revert
                 if safe_mesh.mesh_stamp(bm) != self.stamp or self.snapshot.outside_changed():
-                    self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                    self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             else:
                 bm = bmesh.from_edit_mesh(self.obj.data)
                 # The nested native slide has undo disabled. The outer PolyTailor

@@ -1,48 +1,45 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""New Fill engine: the lane jobs (A, E, the dopt polish, the flow stage, the quality checks) run in local worker
+"""Second Fill search: the jobs (A, E, the dopt polish, the flow stage, the quality checks) run in local worker
 processes, so Blender's own process stays responsive.
 
-- A worker is Blender's own Python (sys.executable; -B -E -s: no bytecode files, no environment variables, no user site packages; started
-  with shell=False) running core/_fill_worker.py's main() (-c, started in core/): NumPy and this package's core/newfill
-  code only, imported from that folder (the import path is left as Python sets it); bpy is not available there.
+- A worker is Blender's own Python (sys.executable, -B -E -s) running core/_fill_worker.py's main() (-c, started in
+  core/); it imports newfill from that folder.
 - Blender and the worker talk over the worker's own standard input / output pipes:
   length-prefixed pickles of the job's arguments and results. Blender never waits on them: pump() reads only the bytes
   already there, on the modal operator's timer ticks, and a message to the worker goes through its outbox (the pipe's
   write end is non-blocking: what the pipe takes now is written, the rest on the next pumps; an idle worker waits in
   a read of the whole message). When Blender ends (also by a crash) the worker reads end-of-file and exits, also
   before its first job.
-- Started lazily (the Fill tool becoming active, or the first job), never at add-on load; at most MAX_PROCS, kept for
+- Started lazily (the Fill tool becoming active, or the first job); at most MAX_PROCS, kept for
   the next Fills while the Fill tool stays active, however long they wait. Leaving the Fill tool (leave(), from the
   session's look) stops them once no run is in progress: idle ones at once, busy ones when their runs have ended. That
   stop is deliberate, never a failed start; the next entry (prewarm) or job starts one again. Stopped when the add-on
   is disabled (shutdown).
 - One job per worker at a time; a run's cancel token is forwarded as a message the job polls at its checks.
-- A worker that dies takes its job with it (that lane is refused); the next jobs get a new worker. So does a worker
+- A worker that dies takes its job with it (that part is refused); the next jobs get a new worker. So does a worker
   that has not answered a job by its deadline (its budget plus JOB_GRACE_S from when the job's message has been
   written; CANCEL_GRACE_S after its cancel), or that takes no byte of the job's message for JOB_GRACE_S: it is
-  stopped (a job whose message it never got all of has not run: it is queued again).
-- If workers cannot be started (two failed starts in a row), the worker lanes are refused for RETRY_S, then the next
+  stopped (a job whose message it never got all of has not run: it waits again).
+- If workers cannot be started (two failed starts in a row), the worker jobs are refused for RETRY_S, then the next
   job tries again (the session's prewarm does not); after MAX_OUTAGES such periods in a row nothing is tried until the
   Fill tool is entered again (then the next job tries) or the add-on is enabled again; a job answered resets the
-  count. A queued job of a cancelled or ended run is ended without a worker (_purge). The quick quality checks
-  (milliseconds, stoppable) run in Blender meanwhile, so the Legacy-engine lane still gives a result and Fill stays
+  count. A waiting job of a cancelled or ended run is ended without a worker (_purge). The quick quality checks
+  (milliseconds, stoppable) run in Blender meanwhile, so the main-search part still gives a result and Fill stays
   responsive.
 - A stopped worker is collected without waiting (_reap: the next pump, prewarm or leave); add-on disable waits for
   them at most SHUTDOWN_WAIT_S."""
-import importlib
 import os
 import pickle
 import signal
 import struct
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
 MAX_PROCS = 3
-RETRY_S = 30.0     # after two failed starts: the worker lanes are refused this long, then starting is tried again
+RETRY_S = 30.0     # after two failed starts: the worker jobs are refused this long, then starting is tried again
 MAX_OUTAGES = 2    # RETRY_S periods in a row: then no start is tried until the Fill tool is entered again
 JOB_GRACE_S = 20.0      # a job not answered by its budget plus this: the worker is stopped (WorkerLost)
 CANCEL_GRACE_S = 10.0   # ... and this long after its cancel was sent
@@ -51,7 +48,7 @@ SHUTDOWN_WAIT_S = 0.5   # add-on disable: the stopped workers are waited for at 
 READY_S = 30.0     # a worker not ready this long after its start is a failed start
 MAGIC = b'PPOW'
 _procs = []
-_queue = []        # jobs waiting for a free worker
+_waiting = []        # jobs waiting for a free worker
 _failed = [0]      # failed starts in a row
 _down_until = [0.0]
 _active = [False]  # the Fill tool is active (prewarm since the last leave): idle workers are kept for the next Fills
@@ -68,7 +65,7 @@ class WorkerLost(Exception):
 
 
 class WorkerUnavailable(Exception):
-    """no worker process could be started: this lane is refused for now."""
+    """no worker process could be started: this search part is refused for now."""
 
 
 class JobCancelled(Exception):
@@ -247,30 +244,19 @@ def _budget(job):
 
 
 def _exception(info):
-    """a worker job's exception, sent as (module, class name, text): the same class here (the engine's modules are
-    named newfill.* in the worker), else an Exception subclass of that name (only the class name is used then)."""
+    """a worker job's exception, sent as (module, class name, text): an Exception subclass of that name (callers
+    read only the class name)."""
     if info is None:
         return None
-    module, name, text = info
-    cls = None
-    try:
-        if module.startswith('newfill.'):
-            cls = getattr(importlib.import_module(__name__.rsplit('.', 1)[0] + module[len('newfill'):]), name, None)
-    except Exception:
-        cls = None
-    if not (isinstance(cls, type) and issubclass(cls, BaseException)):
-        cls = type(name, (Exception,), {})
-    try:
-        return cls(text)
-    except Exception:
-        return type(name, (Exception,), {})(text)
+    _module, name, text = info
+    return type(str(name), (Exception,), {})(text)
 
 
 def _run_inline(job):
     args = [job.token if a is TOKEN else a for a in job.args]
     try:
         job.finish(job.fn(*args), None)
-    except BaseException as exc:   # noqa: BLE001  (a lane failure is a refusal of that lane, class logged)
+    except BaseException as exc:   # noqa: BLE001  (a failed job is a refusal of that search part, class logged)
         job.finish(None, exc)
 
 
@@ -296,26 +282,30 @@ def _start_failed(reason):
         else:
             _down_until[0] = time.monotonic() + RETRY_S
             print('PolyTailor Fill: worker processes could not start (' + reason + '); retrying in', int(RETRY_S), 's')
-        while _queue:
-            _refuse(_queue.pop(0))
+        while _waiting:
+            _refuse(_waiting.pop(0))
 
 
-_SIGPIPE_SET = [False]   # _ignore_sigpipe has looked (once, on the main thread)
+_SIGPIPE_SET = [False]   # _ignore_sigpipe has looked (once)
+_SIGPIPE_OURS = [False]   # SIGPIPE was set to ignore here (shutdown sets it back)
 
 
 def _ignore_sigpipe():
     """POSIX: Blender embeds Python without its signal setup, so SIGPIPE keeps its default action and a write to the
     pipe of a worker that has died would end Blender itself. Ignored (the write then raises BrokenPipeError, which
     pump / dispatch handle by dropping that worker) once, before the first worker starts, only while it is still the
-    default. signal.signal works on the main thread only. Windows: nothing to do (no SIGPIPE)."""
-    if _SIGPIPE_SET[0] or threading.current_thread() is not threading.main_thread():
+    default. When signal.signal refuses the call (ValueError) it is looked at again on the next worker start. Windows: nothing to do (no SIGPIPE)."""
+    if _SIGPIPE_SET[0]:
         return
-    _SIGPIPE_SET[0] = True
     try:
         if os.name != 'nt' and hasattr(signal, 'SIGPIPE') and signal.getsignal(signal.SIGPIPE) == signal.SIG_DFL:
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-    except (ValueError, OSError):
+            _SIGPIPE_OURS[0] = True
+        _SIGPIPE_SET[0] = True
+    except ValueError:   # refused here: looked at again on the next start
         pass
+    except OSError:
+        _SIGPIPE_SET[0] = True
 
 
 def _spawn():
@@ -329,11 +319,11 @@ def _spawn():
 
 
 def submit(job):
-    """queue a job (pipeline._Job): job.fn, job.args (the cancel token replaced by TOKEN), job.token."""
+    """add a job to the waiting list (pipeline._Job): job.fn, job.args (the cancel token replaced by TOKEN), job.token."""
     if _down():
         _refuse(job)
         return
-    _queue.append(job)
+    _waiting.append(job)
     pump()
 
 
@@ -343,7 +333,7 @@ def _a_running():
 
 def _drop(proc):
     """a worker that ended or broke: its job (if any) is refused; the next jobs get a new worker. A job whose message
-    it never got all of has not run: it is queued again (first), once."""
+    it never got all of has not run: it waits again (first), once."""
     job, proc.job = proc.job, None
     unsent = job is not None and proc.deadline is None
     if proc in _procs:
@@ -356,23 +346,23 @@ def _drop(proc):
             job.finish(None, WorkerLost('the Fill worker process ended'))
         elif job.token is not None and job.token.is_set():
             job.finish(None, JobCancelled('cancelled'))
-        elif getattr(job, 'resent', False):   # queued again once already: refused now
+        elif getattr(job, 'resent', False):   # put back once already: refused now
             job.finish(None, WorkerLost('the Fill worker process ended'))
         else:
             job.resent = True
-            _queue.insert(0, job)
+            _waiting.insert(0, job)
 
 
 def _purge():
-    """queued jobs whose run was cancelled or has ended (token set) end now (nobody reads them): no worker is started
+    """waiting jobs whose run was cancelled or has ended (token set) end now (nobody reads them): no worker is started
     for them, and they never keep the workers of a left Fill tool."""
-    for job in [j for j in _queue if j.token is not None and j.token.is_set()]:
-        _queue.remove(job)
+    for job in [j for j in _waiting if j.token is not None and j.token.is_set()]:
+        _waiting.remove(job)
         job.finish(None, JobCancelled('cancelled'))
 
 
 def pump():
-    """forward cancels, read results, stop workers past their job's deadline, dispatch queued jobs; never blocks."""
+    """forward cancels, read results, stop workers past their job's deadline, dispatch waiting jobs; never blocks."""
     _collect()
     _purge()
     for proc in list(_procs):
@@ -413,18 +403,18 @@ def pump():
                 _drop(proc)   # ended, never ready, frozen, or stuck in a job (ready: never a failed start)
         except (EOFError, OSError):
             _drop(proc)
-        except Exception as exc:   # an answer that cannot be read: that lane is refused, the worker is replaced
+        except Exception as exc:   # an answer that cannot be read: that part is refused, the worker is replaced
             print('PolyTailor Fill worker:', type(exc).__name__, exc)
             _drop(proc)
     if not _active[0]:
         _stop_idle()   # the Fill tool was left: the run that kept them has ended
     if _down():
-        while _queue:
-            _refuse(_queue.pop(0))
+        while _waiting:
+            _refuse(_waiting.pop(0))
         return
     # dispatch: one job per idle worker that is ready (reading its input: the send never waits on a starting worker);
     # one new worker at a time; one A at a time
-    for job in list(_queue):
+    for job in list(_waiting):
         if job.fn.__name__ == '_run_a' and _a_running():
             continue
         idle = next((p for p in _procs if p.ready and p.job is None and p.alive()), None)
@@ -432,12 +422,12 @@ def pump():
             if len(_procs) < MAX_PROCS and not any(not p.ready for p in _procs):
                 _spawn()
             break
-        _queue.remove(job)
+        _waiting.remove(job)
         idle.jid += 1
         idle.cancel_sent = False
         try:
             data = pack(('job', idle.jid, job.fn.__name__, list(job.args)))
-        except Exception as exc:   # e.g. an argument that cannot be sent: this lane is refused
+        except Exception as exc:   # e.g. an argument that cannot be sent: this search part is refused
             print('PolyTailor Fill worker:', type(exc).__name__, exc)
             job.finish(None, exc)
             continue
@@ -448,12 +438,12 @@ def pump():
         except (EOFError, OSError):   # the worker ended meanwhile: dropped, the job waits for another one (_drop)
             _drop(idle)
             break
-    if _active[0] and not _procs and not _queue and not _outages[0] and not _down():
+    if _active[0] and not _procs and not _waiting and not _outages[0] and not _down():
         _spawn()   # a worker was lost or stopped while the Fill tool is active: a fresh one for the next Fill
 
 
 def _runs_live():
-    """a New run is in progress (pipeline.steps): its lane jobs may still come."""
+    """a second-search run is in progress (pipeline.steps): its background jobs may still come."""
     from .. import newfill
     pipeline = getattr(newfill, "pipeline", None)   # set once any Fill run imported it; otherwise none is live
     return pipeline is not None and bool(pipeline._LIVE)
@@ -463,7 +453,7 @@ def _stop_idle():
     """the Fill tool was left: once no run is in progress and no job waits, every worker stops. A deliberate stop,
     never a failed start: the next entry (prewarm) or job starts one again."""
     _purge()
-    if _queue or _runs_live():
+    if _waiting or _runs_live():
         return
     while _procs:
         proc = _procs.pop()
@@ -476,7 +466,7 @@ def _stop_idle():
 def leave():
     """the Fill tool is not active (session look): its workers stop as soon as no run needs them (_stop_idle)."""
     _active[0] = False
-    pump()   # pending ready / done messages, cancelled queued jobs, then _stop_idle (not active)
+    pump()   # pending ready / done messages, cancelled waiting jobs, then _stop_idle (not active)
     _collect()
 
 
@@ -497,8 +487,8 @@ def prewarm():
 
 def shutdown():
     """add-on disable: stop every worker."""
-    while _queue:
-        job = _queue.pop(0)
+    while _waiting:
+        job = _waiting.pop(0)
         job.finish(None, RuntimeError('stopped'))
     for proc in list(_procs):
         job, proc.job = proc.job, None
@@ -516,3 +506,15 @@ def shutdown():
         except Exception:
             pass
     _collect()
+    _restore_sigpipe()
+
+
+def _restore_sigpipe():
+    """add-on disable: SIGPIPE back to the default action when _ignore_sigpipe set it and it is still ignored."""
+    if _SIGPIPE_OURS[0]:
+        try:
+            if signal.getsignal(signal.SIGPIPE) == signal.SIG_IGN:
+                signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        except (ValueError, OSError):
+            pass
+    _SIGPIPE_OURS[0] = _SIGPIPE_SET[0] = False

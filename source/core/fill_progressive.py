@@ -150,7 +150,7 @@ def canonical_steps(world, settings, incumbent):
 
 def _canonical_work_steps(world, settings, incumbent, quantum=.00001):
     best = incumbent
-    # Complete both network-plan scheduling branches. A timed legacy slice can finish
+    # Complete both network-plan scheduling branches. A timed main-search slice can finish
     # or defer; running both with fixed work quotas makes that choice explicit.
     for legacy_seconds in (.2, 0.):
         capture = []
@@ -246,7 +246,7 @@ def initial_steps(world, settings, stats=None):
 
 
 def legacy_steps(world, settings, frames=()):
-    """Retain the exact completed legacy incumbent, or finish its fixed schedule."""
+    """Retain the exact completed main-search incumbent, or finish its fixed schedule."""
     if not eligible(settings):
         return None
     for frame in frames:
@@ -345,7 +345,7 @@ def _network_plan(points, centre, u, v, normal, order, result):
 
 
 def cls_steps(world, settings):
-    """classification candidates (fill_cls, PLAN_A v2): cheapest corner set per side count, Takayama."""
+    """classification candidates (fill_cls): cheapest corner set per side count, Takayama."""
     if not eligible(settings):return
     from . import fill_cls
     points=np.asarray(world,float)

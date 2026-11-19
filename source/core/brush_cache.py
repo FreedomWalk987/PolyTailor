@@ -15,8 +15,7 @@ _owner=None
 # Entries dropped by a handler. Freeing the last Python reference to the edit BMesh
 # reallocates all of its custom data (Blender removes its Python-pointer layer). Done
 # inside a depsgraph handler while a native modal tool (Vertex / Edge Slide, Loop Cut)
-# keeps pointers into that data can invalidate its pointers. This is a suspected
-# mechanism for the 1.4.4 report, not a confirmed diagnosis of that crash.
+# keeps pointers into that data can invalidate its pointers (a possible crash).
 # References are kept here and released only where no such tool is running.
 _retired=[]
 _retired_strokes=[]
@@ -268,7 +267,7 @@ class Entry:
     # (each stroke takes the edit mesh anew). A wrapper alive between
     # strokes kept Blender's Python-pointer layer on the edit mesh while native tools
     # ran, and freeing it reallocated all of the mesh's custom data at an unpredictable
-    # moment (1.4.4 crash report).
+    # moment (a possible crash).
     SAMPLES=48
 
     def release_mesh(self):
@@ -331,7 +330,7 @@ def begin(stroke,context):
     _clear_strokes()
     _retired.clear()   # inside our own operator: a safe point
     if _entry is not None and _owner is None:
-        # Flush queued edits made by other tools before taking ownership. Their
+        # Flush pending edits made by other tools before taking ownership. Their
         # dependency notification must invalidate us, not be mistaken for ours.
         context.view_layer.update()
     if _entry is not None and not (_entry.valid(context) and _entry.attach_mesh(bmesh.from_edit_mesh(context.edit_object.data))):

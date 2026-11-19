@@ -2,9 +2,8 @@
 # Copyright (C) 2026 FreedomWalk
 """A PolyTailor Fill worker process, started by core/newfill/worker.py with Blender's own Python (-B -E -s), which
 calls main() (-c "import _fill_worker; _fill_worker.main()", started in this folder). It runs the
-New Fill engine's lane jobs, one at a time, for the Blender session that started it, talking over its own standard
-input / output pipes. Python puts the folder it starts in (this one) on its import path itself, so the engine imports
-as the package `newfill`; the import path is left as it is. It imports only NumPy and core/newfill (never bpy). It ends when
+second Fill search's jobs, one at a time, for the Blender session that started it, talking over its own standard
+input / output pipes. Started in this folder, it imports the engine as the package `newfill`. It ends when
 its input reaches end-of-file (Blender closed it, quit or crashed) or Blender says quit."""
 import os
 
@@ -100,7 +99,7 @@ def main():
         result = exc = None
         try:
             result = JOBS[name](*args)
-        except BaseException as e:   # noqa: BLE001  (sent back: a lane failure is a refusal of that lane)
+        except BaseException as e:   # noqa: BLE001  (sent back: a failed job is a refusal of that search part)
             exc = (type(e).__module__, type(e).__name__, str(e))
         i = worker.OUT_ARG.get(name)
         out = args[i] if i is not None and isinstance(args[i], dict) else None

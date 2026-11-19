@@ -3,7 +3,7 @@
 """Persistent connected Glue chains; no mesh edges are created or removed."""
 import bmesh
 import bpy
-from ..i18n import tr   # reports in the add-on context
+from ..i18n import tr_rpt   # reports in the add-on context
 
 from ..core.glue import VERT_LAYER, EDGE_LAYER
 from ..core.safe_mesh import native_modal_running
@@ -104,12 +104,12 @@ class PPO_OT_glue(bpy.types.Operator):
 
     def execute(self, context):
         if native_modal_running(context):
-            self.report({"WARNING"}, tr("Finish the active transform first"))
+            self.report({"WARNING"}, tr_rpt("Finish the active transform first"))
             return {"CANCELLED"}
         bm = bmesh.from_edit_mesh(context.edit_object.data)
         count, removed = glue_selection(bm, self.unglue)
         if not count:
-            self.report({"INFO"}, tr("Select a Glue member to unglue" if self.unglue else "Select a connected edge chain to Glue"))
+            self.report({"INFO"}, tr_rpt("Select a Glue member to unglue" if self.unglue else "Select a connected edge chain to Glue"))
             return {"CANCELLED"}
         bmesh.update_edit_mesh(context.edit_object.data, loop_triangles=False, destructive=removed)
         _clear_pin_cache()

@@ -33,8 +33,8 @@ def _icon_colours():
         def dflt(c, d):
             return all(abs(a - b) < .5 / 255 for a, b in zip(c, d))
         if (dflt(s.icon_main, [c / 255 for c in palette.ICON_MAIN]) and dflt(s.icon_dim, [c / 255 for c in palette.ICON_DIM])
-                and (palette.close(tuple(s.icon_accent), palette.DARK) or palette.close(tuple(s.icon_accent), palette.LEGACY))
-                and (palette.close(tuple(s.accent), palette.DARK) or palette.close(tuple(s.accent), palette.LEGACY))):
+                and palette.close(tuple(s.icon_accent), palette.DARK)
+                and palette.close(tuple(s.accent), palette.DARK)):
             return None   # the default look: the shipped files (dark / light)
         cols = custom_pie.icon_colours(None)[:3]
     else:
@@ -152,7 +152,7 @@ MODE_KEYS = (
 )
 
 def _separator(layout):
-    layout.separator(type="LINE") if bpy.app.version >= (4, 2, 0) else layout.separator()
+    layout.separator(type="LINE")
 
 
 def _session_entry():
@@ -209,7 +209,7 @@ class PPO_Tool_PolyPen(WorkSpaceTool):
     bl_idname = "ppo.polypen"
     bl_label = "Build "   # TOOL_LABEL_IDS
     bl_description = "Hold Ctrl to preview, Ctrl+LMB to add"
-    bl_icon = _icon("polypen")
+    bl_icon = _shipped("polypen", False).as_posix()   # set again by _register_tools
     bl_widget = None
     bl_keymap = (
         _km("ppo.polypen", "LEFT_CTRL", "PRESS", ctrl=-1),
@@ -221,7 +221,7 @@ class PPO_Tool_PolyPen(WorkSpaceTool):
         scene = props.settings(context)
         header = context.region.type == "TOOL_HEADER"
         if header:
-            # 3in1 is the only Build mode; its face type is the one choice left.
+            # Build's face type
             layout.label(text="Faces:", text_ctxt=props.FACES_CONTEXT)
             layout.row(align=True).prop(scene, "merge3_faces", expand=True)
             _separator(layout)
@@ -240,7 +240,7 @@ class PPO_Tool_Fill(WorkSpaceTool):
     bl_label = "Fill "   # TOOL_LABEL_IDS
     bl_description = ("Select one closed outline, or hover a hole, then hold Ctrl to preview.\n"
                       "Ctrl+Wheel: change choice, Ctrl+click: fill")
-    bl_icon = _icon("fill")
+    bl_icon = _shipped("fill", False).as_posix()   # set again by _register_tools
     bl_widget = None
     bl_keymap = (
         _km("ppo.fill", "LEFT_CTRL", "PRESS"),
@@ -275,7 +275,7 @@ class PPO_Tool_Tweak(WorkSpaceTool):
     bl_idname = "ppo.tweak"
     bl_label = "Tweak "   # TOOL_LABEL_IDS
     bl_description = "Push vertices around with a soft brush"
-    bl_icon = _icon("tweak")
+    bl_icon = _shipped("tweak", False).as_posix()   # set again by _register_tools
     bl_widget = None
     bl_keymap = (_km("ppo.tweak", "LEFTMOUSE", "PRESS"),) + BRUSH_KEYS + COMMON_KEYS + MODE_KEYS
 
@@ -290,7 +290,7 @@ class PPO_Tool_Relax(WorkSpaceTool):
     bl_idname = "ppo.relax"
     bl_label = "Relax "   # TOOL_LABEL_IDS
     bl_description = "Relax topology; hold Ctrl to temporarily drag with the same brush, Alt for Grid Relax"
-    bl_icon = _icon("relax")
+    bl_icon = _shipped("relax", False).as_posix()   # set again by _register_tools
     bl_widget = None
     bl_keymap = (
         _km("ppo.relax", "LEFTMOUSE", "PRESS"),

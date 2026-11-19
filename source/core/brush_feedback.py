@@ -35,7 +35,7 @@ class LocalFeedback:
         ids={v:i for i,v in enumerate(vertices)}
         positions=np.array([(self.stroke.mw@v.co)[:] for v in vertices])
         solver = self.stroke.solver._solver
-        edges = getattr(solver, "length", None)   # R-2: Grid Relax's solver (_Points) has no edge lengths
+        edges = getattr(solver, "length", None)   # Grid Relax's solver (_Points) has no edge lengths
         length = (float(np.median(edges)) if edges is not None
                   else max(self.stroke.radius_world * .02, 1e-8))
         view=self.stroke.context.region_data.view_matrix.inverted().to_3x3()@Vector((0,0,1))

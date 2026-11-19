@@ -15,7 +15,7 @@ class RobustSolver(PatchSolver):
     def __init__(self, points, faces, fixed=None):
         faces = [list(f) for f in faces]
         super().__init__(points,faces,fixed)
-        # Restore explicit constraints; the legacy cosine solver also locked
+        # Restore explicit constraints; the cosine solver also locked
         # every vertex of a degenerate face. A usable neighboring frame lets us
         # recover a collapsed edge instead of freezing its entire neighborhood.
         self.fixed = np.zeros(len(points),dtype=bool) if fixed is None else np.array(fixed,dtype=bool)

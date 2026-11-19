@@ -11,7 +11,7 @@ approach to Gmsh and Takayama et al. (2014), and its placement energy to Garanzh
 et al. (2021). These attributions are kept in the files' docstrings; `core/patterns/chords.py` also names the
 Gmsh copyright holders and license in its header.
 
-Unused legacy solve/fill functions and submap dependencies have been removed.
+Unused older solve/fill functions and submap dependencies have been removed.
 PolyTailor adds cooperative integer search, bounds otherwise unconstrained closed
 interior chords, cooperatively schedules placement optimization, adds validation, preview scheduling,
 per-region controls and GPU overlays. It also adds planned-corner/cyclic-mirror

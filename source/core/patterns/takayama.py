@@ -3,7 +3,7 @@
 """Figure-4 quad skeletons with explicit logical corners and zero-safe padding.
 
 Independent implementation of Takayama, Panozzo, Sorkine-Hornung (2014),
-Sections 2.1-2.3. No published code or artist patch data is used.
+Sections 2.1-2.3.
 """
 import itertools
 import math

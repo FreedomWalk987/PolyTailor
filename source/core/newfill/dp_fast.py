@@ -1,43 +1,27 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
 """S2: windowed, variant-batched, bound-pruned labelling DP (pure Python + NumPy).
-Exactly the plain cyclic labelling DP's result (once apattern.label_dp): same recurrence, same float32 operations, same tie-breaking (first option wins).
+Exactly the plain cyclic labelling DP's result: same recurrence, same float32 operations, same tie-breaking (first option wins).
 
   1. Windows. Per step s and turn count k the arithmetic runs only inside
          window(s, k) = forward-reachable box  ∩  backward (can still close) box,
      both propagated as integer boxes before the DP. Shifts are offset changes, not copies. Cells outside the window
      are never on a closing path, so labels and cost are unchanged.
-  2. Batching (label_dp_batch). Variants that share the rim, the start and kband are solved in ONE pass with a leading
-     variant axis: per-variant costs are broadcast, options a variant lacks cost +inf. label_dp clips every variant
+  2. Batching (label_dp_batch_steps). Variants that share the rim, the start and kband are solved in ONE pass with a leading
+     variant axis: per-variant costs are broadcast, options a variant lacks cost +inf. label_dp_steps clips every variant
      to its own grid (half-width Rr); the batch reproduces that by masking each variant outside its grid.
-  3. Pruning (label_dp(ub=...)). Given the cost ub of ANY labelling the variant allows (path_cost), cells whose cost
+  3. Pruning (label_dp_steps(ub=...)). Given the cost ub of ANY labelling the variant allows (path_cost), cells whose cost
      exceeds ub - (lower bound of the remaining steps) are set to +inf and the tables cropped. Such cells are neither on
      an optimal path nor the best predecessor of a cell that is, so the result is unchanged.
 
-label_dp(th, prm, start, A, ub=None)  -> (labels, cost) | (None, inf)
-label_dp_batch(th, prms, start, A)    -> [(labels, cost) | (None, inf)] in the order of prms (no 'wpos' variants)
-solve(th, prms, start, A)             -> the same list for any mix of variants (groups, batches, prunes)
+Generators (driven step by step by the caller; their return value is the result):
+label_dp_steps(th, prm, start, A, ub=None)  -> (labels, cost) | (None, inf)
+label_dp_batch_steps(th, prms, start, A)    -> [(labels, cost) | (None, inf)] in the order of prms (no 'wpos' variants)
+solve_steps(th, prms, start, A)             -> the same list for any mix of variants (groups, batches, prunes)
 A = the apattern module (vertex_costs, DIRS, check_budget)."""
 import math
 import numpy as np
 
-
-def _drive(gen):
-    """run a generator to its end; its value."""
-    try:
-        while True:
-            next(gen)
-    except StopIteration as done:
-        return done.value
-
-
-def _call_steps(fn, *args, **kwargs):
-    """call fn; when it returns a generator (a *_steps function), step it here."""
-    import inspect
-    out = fn(*args, **kwargs)
-    if inspect.isgenerator(out):
-        out = yield from out
-    return out
 
 _LAB = ('F', 'H', 'R', 'Q')
 _DK = (0, -1, 1, 2)   # pred k offset of F, H, R, Q
@@ -360,11 +344,6 @@ def label_dp_steps(th, prm, start, A, ub=None, P=None):
     return _backtrack(P, choices), float(arr[-ox, -oy])
 
 
-def label_dp(*args, **kwargs):
-    """label_dp_steps run to its end (the synchronous form)."""
-    return _drive(label_dp_steps(*args, **kwargs))
-
-
 def label_dp_batch_steps(th, prms, start, A, preps=None):
     """One DP pass for several variants (same rim, start and kband; none with 'wpos')."""
     if len(prms) == 1:
@@ -475,17 +454,12 @@ def label_dp_batch_steps(th, prms, start, A, preps=None):
     return out
 
 
-def label_dp_batch(*args, **kwargs):
-    """label_dp_batch_steps run to its end (the synchronous form)."""
-    return _drive(label_dp_batch_steps(*args, **kwargs))
-
-
 def _wide(prm):
     """Variants whose reachable set is large (R allowed on nearly flat vertices, or every soft depth)."""
     return prm.get('r_min', 190.0) < 185.0 or prm.get('dwin', 2) > 10 or bool(prm.get('wpos'))
 
 
-PRUNE_MIN_N = 60   # below this the pruning bookkeeping costs more than it saves (measured on the DEV traces)
+PRUNE_MIN_N = 60   # below this the pruning bookkeeping costs more than it saves
 
 
 def solve_steps(th, prms, start, A, known=()):
@@ -513,7 +487,3 @@ def solve_steps(th, prms, start, A, known=()):
                 pool.append(out[i][0])
     return out
 
-
-def solve(*args, **kwargs):
-    """solve_steps run to its end (the synchronous form)."""
-    return _drive(solve_steps(*args, **kwargs))

@@ -23,7 +23,7 @@ CLUSTER_GAP = 2
 MAX_FILL = 24         # cut layouts filled per call (plus the no-cut patch)
 MAX_COMBOS = 80       # cut combinations examined per call
 MAX_SINGLES = 24      # shortest single cuts kept
-WALL = 2.0            # s (work clock, 2.3.6): bound per Fill call; was 4 s wall time
+WALL = 2.0            # s (work clock): bound per Fill call
 K_LAYOUTS = 4         # stop after this many valid pre-ranked cut layouts
 EMIT = 50.0           # deg: a piece node turning below -EMIT keeps a reflex corner
 CAP = .25             # s (work clock): one piece's Takayama search
@@ -201,7 +201,7 @@ _SOLVABLE = {}
 def solvable(s):
     """count-level check against the add-on's 15 Takayama patterns (any rotation).
     Every rotation of s is tried, so the answer is rotation-invariant: it is kept per lexicographically smallest
-    rotation. Its clock reads (geom.check_time) happen only under an active deadline; best_piece runs outside one."""
+    rotation. Its clock reads (geom.check_time) happen only under an active deadline."""
     s = list(s)
     key = min(tuple(s[r:] + s[:r]) for r in range(len(s)))
     if key not in _SOLVABLE:
@@ -225,16 +225,6 @@ def solvable(s):
                 break
         _SOLVABLE[key] = ok
     return _SOLVABLE[key]
-
-
-def best_piece(P, ids, ks, thr=THR):
-    """best_piece_steps run to its end (one blocking call)."""
-    job = best_piece_steps(P, ids, ks, thr)
-    while True:
-        try:
-            next(job)
-        except StopIteration as done:
-            return done.value
 
 
 def best_piece_steps(P, ids, ks, thr=THR):

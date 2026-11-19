@@ -133,7 +133,7 @@ class Tri:
 
 def cdt_polygon(P):
     """Ear clipping of the CCW polygon P, then Lawson flips (constrained Delaunay).
-    v5: ear validity and quality are cached per vertex; after clipping an ear only its two neighbours are
+    Ear validity and quality are cached per vertex; after clipping an ear only its two neighbours are
     re-evaluated, so the whole clipping costs O(n^2) instead of O(n^3)."""
     n = len(P)
     tr = Tri(P, n)
@@ -202,7 +202,7 @@ def tri_quality(a, b, c):
 
 # ------------------------------------------------------------------ size field
 class SizeField:
-    """Shepard interpolation of rim spacing. v5: values come from a grid over the rim bbox (cell <= h_min / 2)
+    """Shepard interpolation of rim spacing. Values come from a grid over the rim bbox (cell <= h_min / 2)
     (bilinear), built once with numpy, so a query is O(1) instead of O(n)."""
     def __init__(self, P, scale=1.0, grid=None):
         P = np.asarray(P, float)
@@ -240,7 +240,7 @@ class SizeField:
         return float((1 - fu) * ((1 - fv) * H[i, j] + fv * H[i, j + 1]) + fu * ((1 - fv) * H[i + 1, j] + fv * H[i + 1, j + 1]))
 
 
-CHECK = None   # v5: optional cooperative budget callback, called every 256 heap pops (raises to abort)
+CHECK = None   # optional cooperative budget callback, called every 256 heap pops (raises to abort)
 
 
 def set_check(fn):

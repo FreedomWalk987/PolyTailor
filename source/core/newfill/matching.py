@@ -4,7 +4,7 @@
 """Maximum-weight maximum-cardinality matching in a general graph.
 
 Edmonds' primal-dual blossom method in the O(V^3) form of Galil (1986, "Efficient algorithms
-for finding maximum matching in graphs", ACM Comput. Surv. 18). Pure Python, no dependencies.
+for finding maximum matching in graphs", ACM Comput. Surv. 18).
 Written from the published algorithm; its data layout follows the widely used
 Galil-based reference design of J. van Rantwijk's mwmatching.py (current repository: MIT licence;
 NetworkX's port: BSD-3). The file is treated as derived from that design; the attribution is in
@@ -42,7 +42,7 @@ def max_weight_matching(nv, edges):
     unused = list(range(nv, 2 * nv))
     dual = [wmax] * nv + [0] * nv
     allowed = [False] * ne
-    queue = []
+    stack = []
 
     def slack(k):
         i, j, w = edges[k]
@@ -64,7 +64,7 @@ def max_weight_matching(nv, edges):
         labelend[w] = labelend[b] = p
         bestedge[w] = bestedge[b] = -1
         if t == 1:
-            queue.extend(leaves(b))
+            stack.extend(leaves(b))
         else:
             base = bbase[b]
             assign(endpoint[mate[base]], 1, mate[base] ^ 1)
@@ -126,7 +126,7 @@ def max_weight_matching(nv, edges):
         dual[b] = 0
         for u in leaves(b):
             if label[inb[u]] == 2:
-                queue.append(u)
+                stack.append(u)
             inb[u] = b
         # best edges to other S-blossoms
         best = [-1] * (2 * nv)
@@ -253,7 +253,7 @@ def max_weight_matching(nv, edges):
                 p = labelend[bt] ^ 1
 
     from . import emesh5
-    check = emesh5.CHECK   # the fallback lane's cancel token / deadline check (fallback5); raises FillRefused
+    check = emesh5.CHECK   # the fallback job's cancel token / deadline check (fallback5); raises FillRefused
     for _stage in range(nv):
         if check is not None:
             check()
@@ -264,14 +264,14 @@ def max_weight_matching(nv, edges):
             bbestedges[i] = None
         for i in range(ne):
             allowed[i] = False
-        del queue[:]
+        del stack[:]
         for v in range(nv):
             if mate[v] == -1 and label[inb[v]] == 0:
                 assign(v, 1, -1)
         augmented = False
         while True:
-            while queue and not augmented:
-                v = queue.pop()
+            while stack and not augmented:
+                v = stack.pop()
                 for p in neighb[v]:
                     k = p // 2
                     w = endpoint[p]
@@ -341,11 +341,11 @@ def max_weight_matching(nv, edges):
                 i, j, _ = edges[dedge]
                 if label[inb[i]] == 0:
                     i, j = j, i
-                queue.append(i)
+                stack.append(i)
             elif dtype == 3:
                 allowed[dedge] = True
                 i, j, _ = edges[dedge]
-                queue.append(i)
+                stack.append(i)
             else:
                 expand(dblos, False)
         if not augmented:

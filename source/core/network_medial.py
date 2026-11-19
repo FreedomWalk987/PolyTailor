@@ -228,7 +228,7 @@ def layout_steps(p,cuts):
 
     A cut with a weak single-cut score may complete a useful neck pair. Test
     every pair before pruning, instead of requiring that first cut to survive
-    the single-cut beam. The embedding queue interleaves search depths.
+    the single-cut beam. The embedding order interleaves search depths.
     """
     whole=(tuple(range(len(p))),);singles=[];pairs=[];triples=[]
     base_reflex=float(-np.minimum(geom.turning(p),0).sum());changes={}

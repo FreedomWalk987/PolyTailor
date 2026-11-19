@@ -1,3 +1,3 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""New Fill engine. Entry: pipeline.steps."""
+"""The second Fill search (also the fallback search). Entry: pipeline.steps."""

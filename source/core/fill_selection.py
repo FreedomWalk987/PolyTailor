@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""Opt-in poles-first selection. Legacy AUTO never enters this module's jobs."""
+"""Poles-first selection (the poles_first policy). The main search's AUTO never enters this module's jobs."""
 from itertools import combinations
 import math
 import numpy as np
@@ -11,7 +11,7 @@ SELECTION_POLICY = 'poles_first'
 QUALITY_FLOOR = .25
 QUALITY_FRACTION = .7
 PROMOTION_BAND = (140., 160.)
-LEGACY_SECONDS = .2      # legacy 1.4.10 search runs first as the incumbent
+LEGACY_SECONDS = .2      # the main search runs first as the incumbent
 LEGACY_RESERVE = .4      # CPU kept back to finish it when the policy finds nothing
 
 
@@ -138,7 +138,7 @@ def policy_corners(unit,refs,settings):
 
 
 def legacy_steps(xy,refs,settings,turns):
-    """Start the 1.4.10 search and run it for a short CPU slice.
+    """Start the main search and run it for a short CPU slice.
 
     Returns (result, job): job is the paused search when it did not finish in its
     slice, so it can resume if the policy search finds nothing. It is paused only
@@ -198,7 +198,7 @@ def planar_steps(xy,refs,settings,turns=None):
         if legacy is None:
             yield from policy
         else:
-            # Leave the unfinished 1.4.10 search time to resume when the policy
+            # Leave the unfinished main search time to resume when the policy
             # search ends with nothing usable.
             cap=geom.time_left()-float(LEGACY_RESERVE)
             spent=0.
@@ -231,7 +231,7 @@ def planar_steps(xy,refs,settings,turns=None):
     finally:
         if legacy is not None:
             legacy.close()
-    # Below the policy floor everywhere: keep what 1.4.10 would have given.
+    # Below the policy floor everywhere: keep the main search's result.
     chosen=choose(pool,settings) or incumbent
     if chosen is None:
         raise boundary_preview.PreviewError('No valid pattern above policy quality floor')

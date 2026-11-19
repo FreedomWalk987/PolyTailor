@@ -1,3 +1,34 @@
+## 1.1.0-s4b6 (test build)
+
+**Fill (Topo)**
+- On a curved source, the fill now follows the surface's shape and sits closer to it.
+- A hole across a sharp crease of the source can be split along the crease, so each side lies on its own side of the fold. This appears as one more choice and is picked first when it is as good or better.
+- Fill on creased and curved surfaces is faster.
+
+**Topo**
+- Shift+A > Retopology Mesh (Topo) no longer limits snapping to one object: every visible mesh is a source. Sidebar > Sources still lets you pick one.
+
+**Build**
+- While dragging a stroke, moving back along it shortens the strip.
+
+**Sidebar and wheel**
+- The sidebar is reorganized: tool buttons with names, 3D / Topo at the top, Pin and Glue in the main panel, and a new Select Mode section (select modes, Retopo Shading, Merge Radius, Correct Face Attributes, Keep Connected).
+- A small hint shows the W (wheel) and Shift+W (settings) keys. Turn it off in Preferences > Display > Show Wheel Hint.
+- Brush masks read All / Unselected / Selected everywhere.
+
+**Other**
+- Warnings follow Blender's translation settings.
+- Stability fixes.
+
+## 1.0.5
+
+- Fill: the HUD shows whether you are in 3D or Topo mode, and the search indicator is on the left.
+- Fill: a second search for a better fill now shows in its own strip below the HUD, so the main result looks finished; when it finds one, the strip says "Better result found".
+- Shift+A > Mesh: New Mesh (3D) adds an empty mesh named "Mesh" at the 3D Cursor and starts in 3D mode; Retopology Mesh (Topo) adds one on the active object and starts in Topo mode with that object as the source.
+- Edit Mode Auto-Save is removed.
+- Fixed: when you step through the results of a wider search, the Fill HUD marks the one shown; Build no longer collapses a triangle when its new tip lands on the triangle's own corner.
+- Stability fixes.
+
 ## 1.0.4
 
 - Fill: a fill is drawn in the viewport as soon as it can be added, and Ctrl+click adds only a fill that has been shown.

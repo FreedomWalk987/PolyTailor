@@ -138,7 +138,7 @@ def sources(context, *, visibility=False):
             continue
         evaluated = obj.evaluated_get(depsgraph)
         if not _invertible(evaluated):
-            continue   # R-3: a zero-scale axis (S Z 0): no local space to cast a ray or find a point in
+            continue   # a zero-scale axis (S Z 0): no local space to cast a ray or find a point in
         if _has_faces(evaluated):
             # objects sharing one mesh without modifiers (e.g. parts linked to a body)
             # evaluate to the very same geometry: keep one of them

@@ -61,7 +61,36 @@ def _groups(loops):
     return [root(i) for i in range(len(loops))]
 
 
-def plan_steps(mw, loops, settings, project=None):
+def _own_plane_steps(plan, pts, plane, quads, shared_normal):
+    """One panel placed on its own best-fit plane instead of the shared one: the shared-plane layout is mapped by
+    the affine fit of its outline, the outline's remaining offsets spread harmonically inside, then smoothed and
+    lifted by harmonic heights. The shared-plane plan stays when the own-plane one folds."""
+    n=len(pts)
+    centre,u,v,normal=fill._frame(pts)
+    if float(normal@shared_normal)<0:   # keep the panel's winding
+        v,normal=-v,-normal
+    own=np.column_stack(((pts-centre)@u,(pts-centre)@v))
+    flat=np.asarray(plane,float)
+    qs=[tuple(q) for q in quads]
+    fit,*_=np.linalg.lstsq(np.column_stack((flat[:n],np.ones(n))),own,rcond=None)
+    placed=np.column_stack((flat,np.ones(len(flat))))@fit
+    placed=placed+geom.laplace(own-placed[:n],len(flat),qs,iterations=240)
+    placed[:n]=own
+    placed=yield from fill_progressive.deterministic_steps(geom.winslow_steps(placed,n,qs))
+    h=geom.laplace(np.column_stack(((pts-centre)@normal,np.zeros(n))),len(flat),qs,iterations=240)[:,0]
+    positions=centre+placed[:,:1]*u+placed[:,1:2]*v+h[:,None]*normal
+    positions[:n]=pts
+    out=dict(plan,positions=positions,normal_ccw=normal)
+    try:
+        fill.validate_plan(out)
+    except fill.FillError:
+        return plan
+    return out
+
+
+def plan_steps(mw, loops, settings, project=None, own_planes=False):
+    """own_planes: each panel's interior is placed on its own best-fit plane (the network counts stay on the shared
+    plane); otherwise every panel uses the shared plane."""
     vertices=sorted({v for loop in loops for v in loop}, key=lambda v:v.index)
     source={v:i for i,v in enumerate(vertices)}
     world=fill.world_points(mw,vertices)
@@ -110,6 +139,8 @@ def plan_steps(mw, loops, settings, project=None):
         plan=dict(positions=positions,quads=qs,boundary=n,order=local_order,virtual=None,collapse=None,
                   normal_ccw=normal,pattern='network',shift=0,rotation=0,corners=(),anchors=[],layout=None)
         fill.validate_plan(plan)
+        if own_planes:
+            plan=yield from _own_plane_steps(plan,world[ids],plane,qs,normal)
         if project is not None:
             plan=yield from project(plan)
         plans.append(plan)

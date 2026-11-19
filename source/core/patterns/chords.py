@@ -26,8 +26,7 @@ from functools import lru_cache
 
 
 def takayama_enabled(settings=None):
-    # An explicit '_takayama' wins over the module switch (the legacy incumbent
-    # search turns it off).
+    # on unless '_takayama' says otherwise (the main search's incumbent run turns it off)
     value = (settings or {}).get('_takayama')
     return True if value is None else bool(value)
 

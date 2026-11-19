@@ -15,7 +15,7 @@ import numpy as np
 from .patterns import geom
 
 N_SIDES = (2, 3, 4, 5, 6)
-K_SETS = 1            # cheapest corner set per N (PLAN_A v2)
+K_SETS = 1            # cheapest corner set per N
 STEP_CAP = 5000       # cooperative engine steps per call (B 240 max 528); failsafe only, counted (not timed) so results never depend on load
 
 

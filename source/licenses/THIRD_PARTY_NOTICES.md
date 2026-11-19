@@ -9,8 +9,8 @@ Relax uses the embedded Relax Lab 0.2.0 numerical core (core/smooth.py)
 and Build uses core/meshpen_logic.py; both are written by the author.
 
 PolyPen_Only (the author's earlier add-on) supplies the extrusion ladder algorithm
-adapted in core/extrude.py. Its original artwork is no longer included; the artwork
-terms are in licenses/ASSETS_LICENSE.md.
+adapted in core/extrude.py. Its original artwork is not included; PolyTailor's own
+icons are covered by licenses/ASSETS_LICENSE.md.
 
 ## Gmsh quad cavity patterns (core/patterns/chords.py)
 

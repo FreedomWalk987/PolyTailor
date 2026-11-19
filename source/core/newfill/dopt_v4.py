@@ -22,7 +22,7 @@ All terms except flow are barriers (-> inf at their limit); the Armijo line sear
 non-finite energies, so every accepted iterate is fold-free and inside the guards.
 
 Stages (L-BFGS each):
-  0  untangle (Garanzha-style regularised barrier, the 2.6.2 energy family) if input folds
+  0  untangle (Garanzha-style regularised barrier) if input folds
   A  TMOP:   mean kappa + w_size mean s + w_orth flow                       (smooth, fair)
   B  max-min SJ: P_p(g clipped at the immovable-corner cap) + w_reg * A, p = 8,16,32
      (skipped when an immovable rim corner already sets min SJ)
@@ -427,7 +427,7 @@ def size_targets(x, C, faces, n_fixed):
 
 
 def untangle(x, C, iterations=400, theta=1.0 / 128, deadline=None, stop=None):
-    """Regularised-barrier untangling (Garanzha et al. 2021; the energy family 2.6.2 uses). Stops at `deadline`
+    """Regularised-barrier untangling (Garanzha et al. 2021). Stops at `deadline`
     (perf_counter seconds) or when stop() is true, between rounds and inside each L-BFGS run."""
     e1 = x[C.a] - x[C.o]
     s = float(np.mean(np.linalg.norm(e1, axis=1))) or 1.0

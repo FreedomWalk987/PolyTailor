@@ -14,7 +14,7 @@ def direction(name):
 
 
 def distance(context, start, xy, pivot, name):
-    """Same fixed axis-containing plane and end-on fallback used by Curve Pen."""
+    """Same fixed axis-containing plane and end-on fallback used by the curve stroke."""
     axis = direction(name)
     _, view = raycast.ray(context, start)
     normal = view-axis*view.dot(axis)

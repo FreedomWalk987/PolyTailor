@@ -14,7 +14,7 @@ ZH_HANT = {
     "Strip folds at a bend; reduce width or redraw the curve": "條帶在彎折處重疊；請縮小寬度或重畫曲線",
     "Tight bend: inner side narrowed": "急彎：內側已收窄",
     "Merging the far end would collapse the quad strip": "末端合併會使四邊面條帶塌陷",
-    # 3in1 is the only Build mode; row strip from an edge chain
+    # Build: face type, row strip from an edge chain
     "Mixed triangles and quads: build a triangle, click again to turn it into a quad": "三角與四邊混合：先建立三角面，再點一次轉成四邊面",
     "Quads only: build quad strips from the selected edge": "只建四邊面：從選取邊建立四邊面條帶",
     "The chain already has faces on both sides: select a chain of open edges": "邊鏈兩側都已有面：請選取開放邊組成的邊鏈",
@@ -25,8 +25,8 @@ ZH_HANT = {
     "Merging the far row would collapse the quad strip": "末端整列合併會使四邊面條帶塌陷",
     "Stroke Density": "筆劃密度",
     "Ctrl+Wheel: change choice | Ctrl+LMB: fill | Esc: cancel": "Ctrl＋滾輪：換方案｜Ctrl＋左鍵：填補｜Esc：取消",
-    "Create an empty mesh object for retopology, enter Edit Mode and start Build":
-        "建立供重拓撲用的空白網格物件，進入編輯模式並切換到建立工具",
+    "Add an empty mesh and start Build: in 3D mode at the 3D Cursor, or in Topo mode on the active object":
+        "新增空白網格並開始建立：3D 模式下放在 3D 游標處，或重拓撲模式下放在作用中物件上",
     "Even": "均勻",
     "Fewer Poles": "少極點",
     "Follows Outline": "沿外框",
@@ -194,9 +194,9 @@ ZH_HANT = {
     "Stop at Edge": "邊緣限制",
     "With surface snapping on, points moved past the edge of the source stop at the edge instead of leaving the surface":
         "開啟表面吸附時，拉出來源物件範圍的點會停在模型邊緣，而不是落到面向畫面的平面上",
-    "New Retopology Mesh": "新增重拓撲網格",
-    "Retopology at Cursor": "重拓撲網格（3D 游標）",
-    "Retopology from Active": "重拓撲網格（沿用作用中物件）",
+    "New PolyTailor Mesh": "新增 PolyTailor 網格",
+    "New Mesh (3D)": "新網格（3D）",
+    "Retopology Mesh (Topo)": "重拓撲網格",
     "At 3D Cursor": "在 3D 游標位置",
     "From Active Object": "沿用作用中物件",
     "Location": "位置",
@@ -239,17 +239,13 @@ ZH_HANT = {
     "Alt+Wheel relaxes the selection; wheel down steps back": "Alt＋滾輪放鬆選取；向下滾動回復上一步",
     "Automatic Retopology Setup": "自動設定重拓撲環境",
     "Set up surface snapping and the overlay while a PolyTailor tool is active; restore on exit": "使用 PolyTailor 時設定表面吸附與疊層，離開工具時還原",
-    "Edit Mode Auto-Save": "編輯模式自動儲存",
-    "Blender's Auto Save does not run in Edit Mode: while a PolyTailor tool is in use, save an auto-save copy, following Blender's Auto Save setting and interval": "Blender 的自動儲存在編輯模式中不會執行：使用 PolyTailor 工具時，依 Blender 的自動儲存設定與間隔保存自動儲存檔",
-    "Edit Mode Auto-Save failed repeatedly and is off for this session": "編輯模式自動儲存多次失敗，本次工作階段已停用",
+    "Show Wheel Hint": "顯示輪盤提示",
     "Dense Relax Feedback": "高面數放鬆即時顯示（實驗）",
     "Experimental local display for dense 3D Relax in Solid retopology views; full native display synchronizes on release": "高面數 3D 放鬆時使用局部顯示；限實體重拓撲視圖，放開後同步完整原生顯示",
     "Model instead of retopologize: no snapping to other objects, no Auto Merge and no Stop at Edge in any PolyTailor tool; Relax keeps the mesh on its own shape. Turn off for the Topo defaults":
         "改為建模而非重拓撲：所有 PolyTailor 工具都不吸附其他物件、不自動合併、不做邊緣限制；放鬆讓網格維持自己的形狀。關閉後套用重拓撲預設設定",
     'PolyTailor Settings': 'PolyTailor 設定',
     "This object's transform has a zero scale; fix the scale of the object or its parents": '這個物件的變換有縮放為零的情況；請修正物件或其父物件的縮放',
-    'This file is an Edit Mode Auto-Save copy of {path}. Use File > Save As to save it there':
-        '此檔案是 {path} 的編輯模式自動儲存副本。請用「檔案 > 另存為」存回該處',
 }
 
 
@@ -383,10 +379,6 @@ ZH_HANT.update({
     "Stroke segments overlap here": "筆劃的分段在此重疊",
     "Value must be finite": "數值必須是有限數",
     "Box select, adding to the selection": "框選並加入目前的選取",
-    "Build Mode": "建立模式",
-    "Build mode": "建立模式",
-    "3in1": "三合一",
-    "The only Build mode (kept for scripts)": "唯一的建立模式（保留給腳本使用）",
     "Segments per screen length: 4 gives one segment every 80 pixels; bends add more. The model's size does not matter":
         "依螢幕長度分段：4 表示每 80 像素一段，彎曲處會加段；與模型大小無關",
     "Track Brush Cursor": "追蹤筆刷游標",
@@ -415,7 +407,7 @@ TERMS = {
 CONTEXT = "Poly Toolset"
 VIEWPORT_HELP_CONTEXT = "Poly Toolset Viewport Help"   # Off = 關閉 here, 解除 for Pin / Glue
 VIEWPORT_HELP = {"Viewport Help": "視窗說明", "Full": "完整", "Compact": "精簡", "Off": "關閉"}
-SHORT_TIPS = ("Build mode",)   # tooltips under four words (descriptions use "*")
+SHORT_TIPS = ()   # tooltips under four words (descriptions use "*")
 
 # Blender's own words shown on add-on surfaces under CONTEXT; the text is Blender 5.2's own zh_HANT.
 BLENDER_WORDS = {
@@ -447,6 +439,17 @@ def tr(message, context="*"):
     return text if text != message else bpy.app.translations.pgettext_iface(message, context)
 
 
+def tr_rpt(message, context="*"):
+    """tr for operator reports: follows Blender's Reports translation setting (tr follows Interface)."""
+    rpt = bpy.app.translations.pgettext_rpt
+    if context not in ("*", CONTEXT):
+        text = rpt(message, context)
+        if text != message:
+            return text
+    text = rpt(message, CONTEXT)
+    return text if text != message else rpt(message, context)
+
+
 def friendly_error(exc, fallback):
     """the text for a caught exception. A raised text that has its own translation is shown as is; any
     other exception text goes to the console and the user sees `fallback` (an existing translated message)."""
@@ -473,7 +476,7 @@ def _build():
         table[(VIEWPORT_HELP_CONTEXT, src)] = dst
     for src, dst in (("Vertex", "點"), ("Edge", "線"), ("Face", "面")):
         table[("Poly Toolset Select Mode", src)] = dst
-    # 3in1 face toggle: official names in their own context, so Blender's own
+    # Build's face toggle: official names in their own context, so Blender's own
     # "Quad" elsewhere keeps its translation.
     for src, dst in (("Tri/Quad", "三角／四邊"), ("Quad", "四邊形"), ("Faces:", "面型："),
                      ("Faces", "面型"), ("Faces: {faces}", "面型：{faces}"),
@@ -528,7 +531,7 @@ ZH_HANT.update({
         "選取一個封閉外框，或移到洞上，再按住 Ctrl 預覽。\nCtrl＋滾輪：換方案，Ctrl＋左鍵：填補",
 })
 
-ZH_HANT.update({"Hold Ctrl: preview a closed loop, Ctrl+Wheel: change choice, Ctrl+click: fill": "按住 Ctrl：預覽封閉線圈，Ctrl＋滾輪：換方案，Ctrl＋左鍵：填補"})
+ZH_HANT.update({"Hold Ctrl: preview the selected outline or hovered hole, Ctrl+Wheel: change choice, Ctrl+click: fill": "按住 Ctrl：預覽已選外框或滑鼠下的洞，Ctrl＋滾輪：換方案，Ctrl＋左鍵：填補"})
 
 ZH_HANT.update({"MMB: Brush / Build | Ctrl+MMB: Fill / Build": "中鍵：筆刷／建立｜Ctrl＋中鍵：填補／建立"})
 

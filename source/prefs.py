@@ -8,11 +8,6 @@ from . import about, palette
 ADDON_ID = __package__
 
 
-def _autosave_update(_prefs=None, _context=None):
-    from . import edit_autosave
-    edit_autosave.update()
-
-
 def _auto_setup_update(_prefs=None, _context=None):
     from . import session
     session.later()   # the setup is applied or restored at once
@@ -33,6 +28,10 @@ class PPO_Preferences(bpy.types.AddonPreferences):
         name="Viewport Help", default="COMPACT", translation_context="Poly Toolset Viewport Help",
         description="Key help in the viewport; keys are always listed in the status bar",
         items=(("FULL", "Full", ""), ("COMPACT", "Compact", ""), ("OFF", "Off", "")))
+    # the sidebar's W / Shift W hint: shown while on, until the W wheel was opened 3 times (counted, never drawn)
+    show_wheel_hint: BoolProperty(translation_context="Poly Toolset", name="Show Wheel Hint", default=True,
+                                  update=lambda self, _context: setattr(self, "wheel_open_count", 0) if self.show_wheel_hint else None)
+    wheel_open_count: IntProperty(default=0, min=0, options={"HIDDEN"})
     stroke_xform_sensitivity: FloatProperty(translation_context="Poly Toolset",
         name="Stroke Transform Sensitivity",
         description="How fast Ctrl+move rotates / scales a stroke or strip preview (Shift: x0.1 finer)",
@@ -59,8 +58,6 @@ class PPO_Preferences(bpy.types.AddonPreferences):
     auto_setup: BoolProperty(translation_context="Poly Toolset", name="Automatic Retopology Setup", default=True,
         update=_auto_setup_update,
         description="Set up surface snapping and the overlay while a PolyTailor tool is active; restore on exit")
-    edit_autosave: BoolProperty(translation_context="Poly Toolset", name="Edit Mode Auto-Save", default=False, update=_autosave_update,
-        description="Blender's Auto Save does not run in Edit Mode: while a PolyTailor tool is in use, save an auto-save copy, following Blender's Auto Save setting and interval")
     dense_feedback: BoolProperty(translation_context="Poly Toolset", name="Dense Relax Feedback", default=False,
         description="Experimental local display for dense 3D Relax in Solid retopology views; full native display synchronizes on release")
     fill_search_mode: EnumProperty(translation_context="Poly Toolset", name="Search", default='FAST', description="How widely Fill searches",
@@ -110,7 +107,6 @@ class PPO_Preferences(bpy.types.AddonPreferences):
         box.prop(self, "snap_distance")
         box.prop(self, "snap_vertex_limit")
         box.prop(self, "auto_setup")
-        box.prop(self, "edit_autosave")
         box = group("Fill")
         box.prop(self, "fill_search_mode")   # the Fill option everyone sees (debug info below: Developer Extras)
         if context.preferences.view.show_developer_ui:   # Blender's convention for debug options
@@ -118,6 +114,7 @@ class PPO_Preferences(bpy.types.AddonPreferences):
         box = group("Display")
         if hasattr(self, "viewport_help"):
             box.prop(self, "viewport_help")
+        box.prop(self, "show_wheel_hint")
         if context.preferences.view.show_developer_ui:   # developer option
             box.prop(self, "dense_feedback")
         box = group("Colors")
@@ -186,7 +183,7 @@ def _compact_rows(kc):
     from .i18n import tr
     out = []
     for key, tool, idname, props in COMPACT_KEYS:
-        kms = ([kc.keymaps.get(km.name) for km, _kmi in pie._keymaps] if tool is None
+        kms = ([kc.keymaps.get(name) for name, _idname in pie._keymaps] if tool is None
                else [_tool_keymap(kc, tool)])
         found = next(((km, kmi) for km in kms if km for kmi in km.keymap_items if kmi.idname == idname
                       and all(getattr(kmi.properties, k, None) == v for k, v in props.items())), None)
@@ -205,9 +202,9 @@ def _keymap_items(kc):
     from .ui import pie
     from . import tools
     out = []
-    for km_addon, kmi_addon in pie._keymaps:
-        km = kc.keymaps.get(km_addon.name)
-        items = [kmi for kmi in (km.keymap_items if km else ()) if kmi.idname == kmi_addon.idname and (
+    for name, idname in pie._keymaps:
+        km = kc.keymaps.get(name)
+        items = [kmi for kmi in (km.keymap_items if km else ()) if kmi.idname == idname and (
             kmi.idname != "wm.call_panel" or getattr(kmi.properties, "name", "") == "PPO_PT_quick_all")]
         if items:
             out.append((None, km, items[:1]))
@@ -257,13 +254,12 @@ def _draw_keymap(prefs, context, col):
 
 
 class _Defaults:
-    """Stand-in when the add-on preferences are unavailable (e.g. dev runs)."""
+    """Stand-in when the add-on preferences are unavailable."""
     pick_radius = 12
     stroke_xform_sensitivity = 0.6
     snap_distance = 30
     snap_vertex_limit = 300_000
     auto_setup = True
-    edit_autosave = False
     dense_feedback = False
     show_debug_info = False
     fill_search_mode = 'FAST'

@@ -31,6 +31,7 @@ CELL_W, CELL_H, CELL_GAP = 58, 48, 6   # 58x48: dense candidates still show thei
 BACKDROP = (0., 0., 0., .6)        # .6: text stays >= 4.5:1 over light-grey meshes
 CELL_BG = (.11, .11, .11, .88)
 LINE = (.86, .86, .86)          # thumbnail strokes (neutral: the accent is reserved for "current")
+GAP2 = 3                        # px x scale between the main box and the second-search strip
 _side = {}                      # region key -> [left, above]: flip hysteresis
 
 
@@ -127,6 +128,26 @@ def _place(hud, w, row_h, strip_h, ctx, key):
     return x, top, above
 
 
+def _second_strip(ctx, state, x, y1, w, h2, s, size):
+    """The second search under the main box (full width): 'search' = grey spinner and muted text; 'better' = accent
+    frame, accent dot and accent text."""
+    pad = PAD * s
+    y0 = y1 - h2
+    acc = palette.accent(ctx)
+    _rect(x, y0, x + w, y1, 6 * s, BACKDROP)
+    c = (x + pad + 9 * s, (y0 + y1) / 2)
+    ty = c[1] - size * .35
+    if state == 'better':
+        _frame(x + .5, y0 + .5, x + w - .5, y1 - .5, 6 * s, (*acc[:3], .9), 1.6 * s)
+        _alpha()
+        gd.disc(c, 3.5 * s, (*acc[:3], 1.))
+        _text((x + pad + 22 * s, ty), _tr("Better result found"), (*acc[:3], 1.), size)
+        return
+    _frame(x + .5, y0 + .5, x + w - .5, y1 - .5, 6 * s, (1., 1., 1., .14), 1. * s)
+    _spinner(ctx, c, 6 * s, s, color=palette.secondary(ctx))
+    _text((x + pad + 22 * s, ty), _tr("Improving fill preview..."), (*palette.muted(ctx)[:3], .9), size)
+
+
 def _tr(msg):
     """The add-on's own translation (i18n CONTEXT); plain English when unavailable (mock / tests)."""
     try:
@@ -167,18 +188,27 @@ def draw(ctx, hud):
     head_w = pad + 6 * s + _text_w(head + fallback_tag, size) + 16 * s + _text_w(tail, size) + spin_w + pad
     slots = len(thumbs)
     cells_w = (pad + 12 * s + slots * cw + (slots - 1) * cg + 12 * s + pad) if slots else 0.
-    w = max(head_w, cells_w, (BAR_W * .6) * s)
-    h = pad + head_h + (ch + pad if slots else 0.)
+    strip_w = pad + 22 * s + max(_text_w(_tr("Improving fill preview..."), size),
+                                 _text_w(_tr("Better result found"), size)) + pad   # always: the box never moves
+    w = max(head_w, cells_w, (BAR_W * .6) * s, strip_w)
+    mode = f.get('mode') or ''
+    msize = max(8, int(size * .8))
+    mode_h = msize + 4 * s if mode else 0.
+    h = pad + mode_h + head_h + (ch + pad if slots else 0.)
     key = (hud.get('region') or 0)
-    x, top, _above = _place(hud, w, h, 0., ctx, key)
+    h2 = size + 2 * pad + 2 * s   # the second-search strip: its room is always kept, so the main box never moves
+    x, top, _above = _place(hud, w, h + GAP2 * s + h2, 0., ctx, key)
     sy1, sy0 = top, top - h
     _rect(x, sy0, x + w, sy1, 6 * s, BACKDROP)
     _frame(x + .5, sy0 + .5, x + w - .5, sy1 - .5, 6 * s, (*acc[:3], .9), 1.6 * s)
-    ty = sy1 - pad - size * .85
-    _text((x + pad + 6 * s, ty), head, main if (thumbs or n) else muted, size)
+    if mode:
+        _text((x + pad + 6 * s, sy1 - pad - msize * .85), mode, (*muted[:3], .9), msize)
+    ty = sy1 - pad - mode_h - size * .85
+    hx = x + pad + 6 * s + spin_w
+    _text((hx, ty), head, main if (thumbs or n) else muted, size)
     if fallback_tag:
-        _text((x + pad + 6 * s + _text_w(head, size), ty), fallback_tag, (*muted[:3], .9), size)
-    tail_x = x + w - pad - spin_w - _text_w(tail, size) - 4 * s
+        _text((hx + _text_w(head, size), ty), fallback_tag, (*muted[:3], .9), size)
+    tail_x = x + w - pad - _text_w(tail, size) - 4 * s
     edges = f.get('edges_text', '') or ''
     if edges and f.get('edges_odd') and tail.startswith(edges):   # odd rim: the edge count in the warning colour
         _text((tail_x, ty), edges, palette.warning(1.0), size)   # the same amber as the thumbnails' odd triangles
@@ -187,7 +217,9 @@ def draw(ctx, hud):
     else:
         _text((tail_x, ty), tail, (*muted[:3], .9), size)
     if busy:
-        _spinner(ctx, (x + w - pad - 9 * s, sy1 - pad - head_h / 2 + 2 * s), 6 * s, s)
+        _spinner(ctx, (x + pad + 9 * s, sy1 - pad - mode_h - head_h / 2 + 2 * s), 6 * s, s)
+    if f.get('second'):
+        _second_strip(ctx, f['second'], x, sy0 - GAP2 * s, w, h2, s, size)
     if not thumbs:
         return
     s_acc = acc[:3]

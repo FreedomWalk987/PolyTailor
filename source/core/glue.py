@@ -10,7 +10,7 @@ import numpy as np
 
 VERT_LAYER = "ppo_glue"
 EDGE_LAYER = "ppo_glue_edges"
-PIN_LAYERS = ("ppo_pins", "hpen_pins", "polypen_only_pins")
+PIN_LAYERS = ("ppo_pins",)
 
 
 class GlueState:

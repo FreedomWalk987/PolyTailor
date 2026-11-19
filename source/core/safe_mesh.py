@@ -265,14 +265,13 @@ def mesh_stamp(bm):
     """Fingerprint: element counts, pin/crease/glue/shape layer presence and a sampled
     geometry fingerprint (geometry_sample, O(K)).
 
-    2.2.10-2.2.12 hashed every vertex, edge and face (plus index_update) twice per
-    mouse event, ~120 ms per event on a 10k-vertex mesh. counts alone
-    missed same-count outside edits (coordinates / UV by another add-on's timer or a
+    Hashing every vertex, edge and face twice per mouse event costs ~120 ms per event
+    on a 10k-vertex mesh, and counts alone miss same-count outside edits (coordinates / UV by another add-on's timer or a
     Python modal below ours, sort_elements); the sample catches reorders and most
     coordinate / UV edits at a fixed cost.
     """
     return (len(bm.verts), len(bm.edges), len(bm.faces), tuple(bm.verts.layers.shape.keys()), geometry_sample(bm),
-            tuple(name for name in ("ppo_pins", "hpen_pins", "polypen_only_pins", "crease_vert")
+            tuple(name for name in ("ppo_pins", "crease_vert")
                   if bm.verts.layers.float.get(name) is not None),
             bool(getattr(bm.verts.layers, "int", None) is not None and bm.verts.layers.int.get("ppo_glue") is not None),
             bool(getattr(getattr(bm.edges, "layers", None), "int", None) is not None

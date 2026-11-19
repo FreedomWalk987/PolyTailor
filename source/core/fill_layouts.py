@@ -18,11 +18,11 @@ def _anchored_map(plan):
         for a, b in zip(face, face[1:]+face[:1]):
             incidence[tuple(sorted((a, b)))].append(k)
     # Walking faces from the anchored rim makes interior numbering irrelevant.
-    queue = deque(zip(boundary, boundary[1:]+boundary[:1]))
+    frontier = deque(zip(boundary, boundary[1:]+boundary[:1]))
     visited = set()
     next_label = len(boundary)
-    while queue:
-        a, b = queue.popleft()
+    while frontier:
+        a, b = frontier.popleft()
         for k in incidence[tuple(sorted((a, b)))]:
             if k in visited:
                 continue
@@ -36,7 +36,7 @@ def _anchored_map(plan):
                 if vertex not in labels:
                     labels[vertex] = next_label
                     next_label += 1
-            queue.extend(zip(ring, ring[1:]+ring[:1]))
+            frontier.extend(zip(ring, ring[1:]+ring[:1]))
     if len(visited) != len(faces):
         raise ValueError('Layout is not connected to its boundary')
     def canonical(face):
@@ -63,6 +63,34 @@ def _same_mesh(first, second):
 
 
 LEGACY_KEY = ('legacy',)
+CREASE_MINQ_TOL = 1e-3   # a crease fill's minQ counts as the same as the default's within this
+
+
+def _is_crease(key):
+    """the entry key of a fill split along a source crease"""
+    return isinstance(key, tuple) and key[-1:] == ('crease',)
+
+
+def _crease_rank(plan):
+    """crease fills: fewest interior poles, then the highest minQ"""
+    from .fill_flow import metrics
+    m = metrics(plan)
+    return (int(m['poles']), -round(float(m['minQ']), 3))
+
+
+def _crease_choice(crease, base, floor):
+    """the default with a crease fill present: the crease fill when it has no more interior poles than `base` (the
+    default without it) and the same or a higher minQ, or when `base` is missing or ineligible; else `base`."""
+    from .fill_flow import eligible, metrics
+    try:
+        if base is None or not eligible(base, floor):
+            return crease
+        m, b = metrics(crease), metrics(base)
+        if m['poles'] <= b['poles'] and m['minQ'] >= b['minQ'] - CREASE_MINQ_TOL:
+            return crease
+    except Exception:
+        pass
+    return base
 
 
 def _representative_key(plan):
@@ -78,9 +106,9 @@ def _representative_key(plan):
 
 
 def _representative(variants, prefer_plain=False):
-    """The placement that represents one topology: R1's or the best S. With `prefer_plain` (2.5.0
+    """The placement that represents one topology: the default rule's or the best S. With `prefer_plain` (the
     hybrid, full pool) an exact tie goes to a plain plan, and ties between classification plans to the fingerprint;
-    ties between plain plans keep the 2.4 order."""
+    ties between plain plans keep their input order (the first wins)."""
     from .fill_flow import fingerprint, r1_key
     variants = list(variants)
     if not prefer_plain:
@@ -144,15 +172,20 @@ class Portfolio:
             return self.add_legacy(plan)
         if self.reference is not None:
             # Extra cuts must not suppress any released generator or field search.
-            if not plan.get('_corner_cut_candidate') and not plan.get('_direct') and not plan.get('_step4_candidate'):
+            if (not plan.get('_corner_cut_candidate') and not plan.get('_direct') and not plan.get('_step4_candidate')
+                    and not plan.get('_crease_candidate')):
                 self.reference.add(plan)
             from .fill_flow import fingerprint, eligible, score
             key = signature(plan)
-            if plan.get('_step4_candidate'):   # step 4: New's fill is its own entry, never a Legacy placement
+            if plan.get('_step4_candidate'):   # step 4: a second-search fill is its own entry, never a main placement
                 key = key + ('step4',)
+            if plan.get('_crease_candidate'):   # a fill split along a source crease: one entry, its best fill
+                key = key + ('crease',)
             if self.locked and key == self.selected:
                 return False
             if not eligible(plan, self.quality_floor):
+                return False
+            if plan.get('_crease_candidate') and not self._crease_slot(key, plan):
                 return False
             if plan.get('_cls_candidate'):
                 self.has_cls = True
@@ -201,6 +234,35 @@ class Portfolio:
             self.default = self._normal_keys()[0]   # the default keeps moving after a wheel step
         return True
 
+    def crease_rank(self, plan):
+        """The order of crease fills (smaller first): one that would be the default over the other candidates first,
+        then the fewest interior poles, then the highest minQ."""
+        rest = [p for _s, p in self.entries.values() if not p.get('_crease_candidate')]
+        if self.legacy is not None:
+            rest.append(self.legacy)
+        base = self._r1_choice(rest) if rest else None
+        return (_crease_choice(plan, base, self.quality_floor) is not plan,) + _crease_rank(plan)
+
+    def _crease_slot(self, key, plan):
+        """One crease entry: a new crease fill replaces the kept one only when it ranks before it (crease_rank), and
+        never while the wheel holds the kept one. True when the new fill may be added."""
+        old = [k for k in self.entries if _is_crease(k) and k != key]
+        if not old:
+            return True
+        if self.locked and self.selected in old:
+            return False
+        if self.crease_rank(plan) >= min(self.crease_rank(self.entries[k][1]) for k in old):
+            return False
+        for k in old:
+            self.entries.pop(k, None)
+            self.placements.pop(k, None)
+            self.plain_seen.pop(k, None)
+            if getattr(self, 'default', None) == k:
+                self.default = None
+            if self.selected == k:
+                self.selected = None
+        return True
+
     def _plan_of(self, key):
         if key == LEGACY_KEY:
             return self.legacy
@@ -219,7 +281,7 @@ class Portfolio:
         candidates = list(reps.values()) if reps is not None else [plan for score, plan in self.entries.values()]
         if self.legacy is not None:
             candidates.append(self.legacy)
-        if getattr(self, 'rank_r1', False):   # rule R1 delta 3 (study band_max), no guards
+        if getattr(self, 'rank_r1', False):   # default rule, delta 3 (band_max), no guards
             chosen, key = self._r1_choice(candidates), None
         else:
             chosen = guarded_choice(candidates, self.legacy, self.quality_floor)
@@ -232,7 +294,7 @@ class Portfolio:
                 if self.locked:
                     key = LEGACY_KEY if self.legacy_match is None or self.selected == LEGACY_KEY else self.legacy_match
                 else:
-                    # A released standalone legacy slot can also be the fixed reference.
+                    # A standalone main-search slot can also be the fixed reference.
                     self.legacy = chosen
                     self.legacy_slot = LEGACY_KEY
                     key = LEGACY_KEY
@@ -241,10 +303,17 @@ class Portfolio:
             self.selected = key
 
     def _r1_choice(self, candidates):
-        """rule (a) (_r1_pick). Step 4: with New's fill among the candidates (_step4_candidate), the pick over all of
-        them stays only if it has no more interior poles than the pick over the Legacy candidates alone and its minQ
-        is not lower than that one's by more than RANK_MINQ_GUARD; otherwise the Legacy-only pick stays. An ineligible
-        Legacy-only pick (below the floor: r1_band used the whole pool) never stays over an eligible pick."""
+        """rule (a) (_r1_pick). Step 4: with the second search's fill among the candidates (_step4_candidate), the
+        pick over all of them stays only if it has no more interior poles than the pick over the main search's
+        candidates alone and its minQ is not lower than that one's by more than RANK_MINQ_GUARD; otherwise the
+        main-search-only pick stays. An ineligible main-search-only pick (below the floor: r1_band used the whole
+        pool) never stays over an eligible pick. A crease fill (_crease_candidate) is the pick when it has no more
+        interior poles than the pick over the other candidates and its minQ is the same or higher (CREASE_MINQ_TOL),
+        or when that pick is missing or ineligible; otherwise that pick stays."""
+        crease = [p for p in candidates if p is not None and p.get('_crease_candidate')]
+        if crease:
+            base = self._r1_choice([p for p in candidates if p is None or not p.get('_crease_candidate')])
+            return _crease_choice(min(crease, key=_crease_rank), base, self.quality_floor)
         pick = self._r1_pick(candidates)
         if pick is None or not any(p is not None and p.get('_step4_candidate') for p in candidates):
             return pick
@@ -254,7 +323,7 @@ class Portfolio:
         from .fill_flow import eligible, metrics, RANK_MINQ_GUARD
         try:
             if eligible(pick, self.quality_floor) and not eligible(base, self.quality_floor):
-                return pick   # never an ineligible Legacy fill over an eligible one
+                return pick   # never an ineligible main-search fill over an eligible one
             m, b = metrics(pick), metrics(base)
             if m['poles'] <= b['poles'] and m['minQ'] >= b['minQ'] - RANK_MINQ_GUARD:
                 return pick
@@ -302,7 +371,7 @@ class Portfolio:
         return reps
 
     def _apply_representatives(self, reps):
-        """Write only the entries whose representative changed; refresh the legacy match once."""
+        """Write only the entries whose representative changed; refresh the main-search match once."""
         from .fill_flow import score
         changed = False
         for key, rep in reps.items():
@@ -374,6 +443,16 @@ class Portfolio:
                              if shown[i] not in (protected, self.selected, getattr(self, 'default', None))), None)
                 if drop is not None:
                     shown[drop] = cuts[0]
+        crease = next((k for k in keys if _is_crease(k)), None)
+        if crease is not None and crease not in shown:   # the crease fill always stays in the wheel
+            if len(shown) < self.limit:
+                shown.append(crease)
+            else:
+                drop = next((i for i in range(len(shown)-1, -1, -1)
+                             if shown[i] not in (protected, self.selected, getattr(self, 'default', None))
+                             and shown[i] not in cuts), None)
+                if drop is not None:
+                    shown[drop] = crease
         shown.sort(key=lambda k: keys.index(k))
         return shown
 
@@ -402,12 +481,17 @@ class Portfolio:
             b = id(p) in in_band
             return (k != first, not b, not eligible(p, self.quality_floor), bk if b else (-s,),
                     (1, ()) if k == LEGACY_KEY else (0, k))
-        return sorted(shown, key=r1)
+        order = sorted(shown, key=r1)
+        crease = next((k for k in order[1:] if _is_crease(k)), None)
+        if crease is not None:   # a crease fill that is not the default is the next entry
+            order.remove(crease)
+            order.insert(1, crease)
+        return order
 
     def _stable(self, shown):
         """lock the selection, not the order. The order is always the
-        default first, then S (2.6.1; U with Legacy ranking); a wheel choice is kept by identity, so its index
-        may move (1/2 -> 2/3) but the view never jumps to another entry."""
+        default first, then S (U with the main search's ranking); a wheel choice is kept by identity, so
+        its index may move (1/2 -> 2/3) but the view never jumps to another entry."""
         return list(shown)
 
     def _ranked_keys(self):

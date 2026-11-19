@@ -338,11 +338,6 @@ def build_mesh_steps(labels, n):
     return faces, rim, len(softs)
 
 
-def build_mesh(*args, **kwargs):
-    """build_mesh_steps run to its end."""
-    return _drive(build_mesh_steps(*args, **kwargs))
-
-
 def index_mesh_steps(faces_k, rim_k):
     ids = {k: i for i, k in enumerate(rim_k)}
     nxt = len(ids)
@@ -357,11 +352,6 @@ def index_mesh_steps(faces_k, rim_k):
             row.append(ids[k])
         faces.append(row)
     return np.array(faces, int), nxt
-
-
-def index_mesh(*args, **kwargs):
-    """index_mesh_steps run to its end."""
-    return _drive(index_mesh_steps(*args, **kwargs))
 
 
 def check_topology_steps(faces, n, nv):
@@ -393,11 +383,6 @@ def check_topology_steps(faces, n, nv):
     if len(used) != nv:
         return False
     return nv - len(und) + len(faces) == 1
-
-
-def check_topology(*args, **kwargs):
-    """check_topology_steps run to its end."""
-    return _drive(check_topology_steps(*args, **kwargs))
 
 
 # ----------------------------------------------------------------- smoothing
@@ -453,11 +438,6 @@ def tutte_steps(xy_rim, faces_list, n, nv, iters=None):
         rs = rn
     pos[n:] = x
     return pos
-
-
-def tutte(*args, **kwargs):
-    """tutte_steps run to its end (the synchronous form)."""
-    return _drive(tutte_steps(*args, **kwargs))
 
 
 def corner_sj(pos, F):
@@ -649,11 +629,6 @@ def polish_steps(pos, F_all, n, rounds=4, thr=0.5):
     return np.array(P)
 
 
-def polish(*args, **kwargs):
-    """polish_steps run to its end (the synchronous form)."""
-    return _drive(polish_steps(*args, **kwargs))
-
-
 def optimize_sj_steps(pos, F_all, n, hinge, iters=60, lam=0.02, mu=0.0, r0=0.26):
     """Raise the corner scaled Jacobians sj_c towards `hinge` (rim fixed) by backtracking gradient steps on
     E = 100 * sum_c w_c * max(0, hinge - sj_c)^2      (w_c = 0.3 at rim corners, 1 inside)
@@ -740,11 +715,6 @@ def optimize_sj_steps(pos, F_all, n, hinge, iters=60, lam=0.02, mu=0.0, r0=0.26)
     return P
 
 
-def optimize_sj(*args, **kwargs):
-    """optimize_sj_steps run to its end (the synchronous form)."""
-    return _drive(optimize_sj_steps(*args, **kwargs))
-
-
 def quick_metrics(pos, F_all, n):
     """minSJ (raw, triangles included as in the rubric), interior irregulars, tolerant rim mismatches, strip flag."""
     nb = [set() for _ in range(len(pos))]
@@ -794,7 +764,7 @@ VARIANTS = [dict(), dict(soft=False), dict(wpole=0.5), dict(wpole=3.0), dict(wpo
 
 def labellings_steps(xy, prm, variants):
     """Closing labellings of the rim, per variant: attempt 0 of every variant is solved batched / bound-pruned
-    (dp_fast.solve, exact), the nogood retries by the windowed single DP (dp_fast.label_dp, pruned by the best
+    (dp_fast.solve_steps, exact), the nogood retries by the windowed single DP (dp_fast.label_dp_steps, pruned by the best
     labelling found so far). Results equal the plain cyclic labelling DP's unless the fill's deadline expires inside
     the DP."""
     from . import apattern as A   # this module (dp_fast reads its costs and budget check)
@@ -880,11 +850,6 @@ def labellings_steps(xy, prm, variants):
     return out, th
 
 
-def labellings(*args, **kwargs):
-    """labellings_steps run to its end (the synchronous form)."""
-    return _drive(labellings_steps(*args, **kwargs))
-
-
 def label_bound(labels, th):
     """Upper bound of the candidate's min SJ from the rim angles, interior irregulars and tolerant mismatches."""
     f = np.array([{'H': 1, 'F': 2, 'R': 3, 'S': 2, 'Q': 4}[l[0]] for l in labels], float)
@@ -921,20 +886,10 @@ def build_mesh_cached_steps(labels, n):
     return [list(f) for f in faces], list(rim), nsoft   # copies: the cache stays safe whatever a caller does
 
 
-def build_mesh_cached(*args, **kwargs):
-    """build_mesh_cached_steps run to its end."""
-    return _drive(build_mesh_cached_steps(*args, **kwargs))
-
-
 def mesh_from_labels_steps(labels, n):
     fk, rk, nsoft = yield from build_mesh_cached_steps(labels, n)
     faces, nv = yield from index_mesh_steps(fk, rk)
     return faces, nv
-
-
-def mesh_from_labels(*args, **kwargs):
-    """mesh_from_labels_steps run to its end."""
-    return _drive(mesh_from_labels_steps(*args, **kwargs))
 
 
 def realize_steps(xy, faces, nv, n, prm, tri=None, bound=None):
@@ -954,11 +909,6 @@ def realize_steps(xy, faces, nv, n, prm, tri=None, bound=None):
     return pos, F_all
 
 
-def realize(*args, **kwargs):
-    """realize_steps run to its end (the synchronous form)."""
-    return _drive(realize_steps(*args, **kwargs))
-
-
 def plans_even_steps(xy, prm, variants, tri_map=None, extra_bound=1.0, tag=None):
     n = len(xy)
     out = []
@@ -969,11 +919,6 @@ def plans_even_steps(xy, prm, variants, tri_map=None, extra_bound=1.0, tag=None)
         ub = sj_eff(b, prm) - prm['k_irr'] * irr - prm['k_btol'] * btol - (prm['k_terr'] if b < 0.3 else 0.0)
         out.append(dict(ub=ub, b=b, labels=labels, vi=vi, xy=xy, n=n, tri_map=tri_map, tag=tag))
     return out
-
-
-def plans_even(*args, **kwargs):
-    """plans_even_steps run to its end (the synchronous form)."""
-    return _drive(plans_even_steps(*args, **kwargs))
 
 
 def run_plan_steps(pl, prm):
@@ -996,11 +941,6 @@ def run_plan_steps(pl, prm):
     if m['minSJ'] <= 0:
         raise FillRefused('inverted after smoothing')
     return select_key(m, prm), pos, F_all, dict(labels=pl['labels'], m=m, vi=pl['vi'], tri=pl['tag'])
-
-
-def run_plan(*args, **kwargs):
-    """run_plan_steps run to its end (the synchronous form)."""
-    return _drive(run_plan_steps(*args, **kwargs))
 
 
 def fill_xy_steps(xy, prm=None):
@@ -1046,11 +986,6 @@ def fill_xy_steps(xy, prm=None):
     return bestc[1], bestc[2], info
 
 
-def fill_xy(*args, **kwargs):
-    """fill_xy_steps run to its end (the synchronous form)."""
-    return _drive(fill_xy_steps(*args, **kwargs))
-
-
 def _odd_plans_steps(xy, prm, kind, v):
     n = len(xy)
     if kind == 'ear':
@@ -1078,11 +1013,6 @@ def _odd_plans_steps(xy, prm, kind, v):
         mp = np.array(list(range(v + 1)) + [n] + list(range(v + 1, n)) + list(range(n + 1, n + 1 + nv - m)))
         return mp[faces], nv, tri, xy, n
     return (yield from plans_even_steps(sub, prm, prm.get('odd_variants') or ODD_VARIANTS, tmap, extra_bound=0.866, tag=(kind, v)))
-
-
-def _odd_plans(*args, **kwargs):
-    """_odd_plans_steps run to its end (the synchronous form)."""
-    return _drive(_odd_plans_steps(*args, **kwargs))
 
 
 ODD_VARIANTS = [dict(), dict(soft=False), dict(r_min=168.0, wm=0.6, wpole=2.0)]

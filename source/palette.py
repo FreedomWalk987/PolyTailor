@@ -8,7 +8,6 @@ LIGHT_MAIN = (45/255,)*3 + (1.0,)
 DARK_GREY = (130/255,)*3 + (1.0,)
 DARK_MUTED = (176/255,)*3 + (1.0,)   # #B0B0B0, 5.0:1 on the default viewport
 LIGHT_GREY = (100/255,)*3 + (1.0,)
-LEGACY = (.18, .827, .718, 1.0)
 WARNING = (1.0, .8, .04, 1.0)
 # Fill/Build previews: a faint accent wash with a warm apricot line,
 # so previews read apart from the accent outline without a hard white edge.
@@ -61,7 +60,7 @@ def muted(context=None, alpha=1.0):
 def accent(context=None, alpha=1.0):
     from . import prefs
     color = tuple(prefs.get(context).accent)
-    if close(color, DARK) or close(color, LEGACY):
+    if close(color, DARK):
         color = LIGHT if light_theme(context) else DARK
     return (*color[:3], alpha)
 
@@ -69,7 +68,7 @@ def accent(context=None, alpha=1.0):
 def preview_fill(context=None):
     from . import prefs
     color = tuple(prefs.get(context).preview_fill)
-    return (*accent(context)[:3],color[3]) if close(color[:3],DARK[:3]) or close(color[:3],LEGACY[:3]) else color
+    return (*accent(context)[:3],color[3]) if close(color[:3],DARK[:3]) else color
 
 
 def preview_border(context=None):

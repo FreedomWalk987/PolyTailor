@@ -9,25 +9,6 @@ deliberately keeps its normal texture-follows-geometry behavior.
 import bmesh
 import bpy
 
-# Module reload must not leave an earlier callback queued with stale lifetime.
-_previous_callback = globals().get("_initialize_scenes")
-if _previous_callback is not None and bpy.app.timers.is_registered(_previous_callback):
-    bpy.app.timers.unregister(_previous_callback)
-del _previous_callback
-
-
-def initialize(scene):
-    """Correct Face Attributes is the user's own setting (off by Blender's default). Earlier versions
-    switched it on once per scene and marked that scene (face_attributes_initialized): only such a
-    scene gets it switched off, once. Any other scene is only marked; its values are left as they are.
-    Called on entering a PolyTailor tool (defaults.apply_scene), never at add-on enable."""
-    settings = scene.ppo
-    if not settings.face_attributes_default_off:
-        if settings.face_attributes_initialized:   # a scene an earlier version switched on
-            scene.tool_settings.use_transform_correct_face_attributes = False
-            scene.tool_settings.use_transform_correct_keep_connected = True
-        settings.face_attributes_default_off = True
-
 
 def _has_data(bm):
     layers = bm.loops.layers

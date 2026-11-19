@@ -2,11 +2,11 @@
 # Copyright (C) 2026 FreedomWalk
 """Build: hold Ctrl to preview, Ctrl+click to insert, keep dragging to place.
 
-3in1 is the only Build mode. What gets inserted depends on the selection,
-the hovered element and the 3in1 face type (Scene > ppo > merge3_faces):
+What gets inserted depends on the selection, the hovered element and the
+face type (Scene > ppo > merge3_faces):
 
   nothing selected        -> new vertex, or split the hovered edge
-  one vertex selected     -> Curve Pen: new vertex connected to it (Ctrl+drag: freehand)
+  one vertex selected     -> curve stroke: new vertex connected to it (Ctrl+drag: freehand)
   edge selected (Quad)    -> quad strip: new edge parallel to the selected one
   edge selected (Tri/Quad)-> triangle; click again with the triangle selected
                              to turn it into a quad
@@ -21,7 +21,7 @@ from math import cos, sin, hypot
 import bmesh
 import bpy
 from mathutils import Vector
-from ..i18n import tr as iface_, friendly_error   # add-on context first; friendly_error
+from ..i18n import tr as iface_, tr_rpt, friendly_error   # add-on context first; friendly_error
 
 from .. import prefs, props, palette
 from ..core import draw, raycast, safe_mesh, snap, units
@@ -83,7 +83,7 @@ class PolyPenState:
         self.refresh()
 
     def insert_mode(self):
-        """3in1, the only Build mode: Tri/Quad, or quads only (the "4" face type)."""
+        """The face type: Tri/Quad, or quads only (the "4" face type)."""
         return "QUAD-ONLY" if self.scene.merge3_faces == "QUAD" else "TRI/QUAD"
 
     def refresh(self):
@@ -129,7 +129,6 @@ class PolyPenState:
         if not self.bm.is_valid or self._view_key() != self.view_key:
             self.refresh()
         bind_view(self.view)
-        self.logic.vertex_curve_pen = True   # 3in1: one selected vertex draws a Curve Pen
         self.logic.update(self.context, SimpleNamespace(mouse_region_x=xy.x, mouse_region_y=xy.y),
             self.insert_mode(), self.scene.quad_stability,
             self.scene.knife_junctions, self.scene.knife_constrain)
@@ -252,7 +251,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         self.state.close_attributes()
         if self.snapshot is not None:
             if self.snapshot.restore() is False:   # shape keys changed outside; kept
-                self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             else:
                 self._restore_select_mode()
             self.snapshot.close()
@@ -262,7 +261,7 @@ class PPO_OT_polypen(bpy.types.Operator):
             self.state.refresh()
 
     def _restore_select_mode(self):
-        """B-4: the select mode recorded with this snapshot (the click turned Vertex mode on)."""
+        """The select mode recorded with this snapshot (the click turned Vertex mode on)."""
         saved = getattr(self, "select_mode_saved", None)
         self.select_mode_saved = None
         if saved is None or saved[0] is not self.snapshot:
@@ -368,7 +367,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         if (event.type == "LEFTMOUSE" and event.value == "PRESS" and not self.placing
                 and self.stroke_pending is None and not self.stroke_drawing
                 and not self._over_own_region(context, event)):
-            # B-3: a click in another area or region never builds in this view (off-screen);
+            # a click in another area or region never builds in this view (off-screen);
             # the click goes to where it was made; a held stroke is kept (Build stays), otherwise the pen ends
             if getattr(self, 'stroke_curve', None) is not None:
                 return {"PASS_THROUGH"}
@@ -447,7 +446,7 @@ class PPO_OT_polypen(bpy.types.Operator):
                 # an outside edit since our last event: keep it, roll nothing back
                 self.snapshot.close()
                 self.snapshot = None
-                self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             self._rollback()
             self._end(context)
             return {"CANCELLED"}
@@ -484,7 +483,7 @@ class PPO_OT_polypen(bpy.types.Operator):
                 created = self.state.commit(self.plan)
         except (ValueError, ReferenceError, ZeroDivisionError) as exc:   # the last: geometry seen edge-on
             self._rollback()
-            self.report({"WARNING"}, iface_(friendly_error(exc, "This path cannot split the face")))
+            self.report({"WARNING"}, tr_rpt(friendly_error(exc, "This path cannot split the face")))
             self._replan(context)
             return
         if created:
@@ -530,7 +529,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         return out
 
     def _line_anchor(self):
-        """Only the ordinary one-vertex Curve Pen extension owns segment input."""
+        """Only the ordinary one-vertex curve stroke extension owns segment input."""
         st = self.state
         if (self.plan.action == VERT_EDGE and st.logic.selected is not None
                 and len(st.logic.selected[bmesh.types.BMVert]) == 1):
@@ -861,7 +860,7 @@ class PPO_OT_polypen(bpy.types.Operator):
             self.stroke_cursor = None
             self.stroke_xform, self.stroke_press = (1.0, 0.0), None
             context.area.header_text_set(None)
-            self.report({'WARNING'}, iface_(friendly_error(exc, "This stroke could not be built here")))
+            self.report({'WARNING'}, tr_rpt(friendly_error(exc, "This stroke could not be built here")))
             st.refresh()
             self._replan(context)
             return
@@ -941,7 +940,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         except ValueError as exc:
             self._rollback()
             self._clear_stroke(context)
-            self.report({'WARNING'}, iface_(friendly_error(exc, "This stroke could not be built here")))
+            self.report({'WARNING'}, tr_rpt(friendly_error(exc, "This stroke could not be built here")))
             st.refresh()
             self._replan(context)
             return
@@ -1044,6 +1043,7 @@ class PPO_OT_polypen(bpy.types.Operator):
                     self.stroke_cursor = None
                     self.stroke_xform, self.stroke_press = (1.0, 0.0), None
                     self.stroke_curve = BuildStroke(anchor, 1.25 * prefs.ui_scale(context))
+                    self.stroke_curve.width = self._stroke_screen_width(context)   # retract capture distance
                     if self.stroke_chain is not None:
                         # Bound the preview cost: rows x (K-1) cells.
                         self.stroke_curve.MAX_SEGMENTS = max(1, min(BuildStroke.MAX_SEGMENTS,
@@ -1073,6 +1073,19 @@ class PPO_OT_polypen(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
         return None
 
+    def _stroke_screen_width(self, context):
+        """the strip's width on screen (px): the selected edge, or the chain's end-to-end span; 0 when unknown."""
+        st = self.state
+        ends = None
+        if self.stroke_chain is not None and len(self.stroke_chain) >= 2:
+            ends = (self.stroke_chain[0], self.stroke_chain[-1])
+        elif self.stroke_edge is not None:
+            ends = tuple(self.stroke_edge.verts)
+        if ends is None:
+            return 0.0
+        a, b = (raycast.to_screen(context, st.mw @ v.co) for v in ends)
+        return float((b - a).length) if a is not None and b is not None else 0.0
+
     def _stroke_start(self, context):
         st = self.state
         self.stroke_reject = None
@@ -1081,7 +1094,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         edges = st.logic.selected[bmesh.types.BMEdge]
         if edges:
             candidates = []
-            # B-1: only the edges that can pass the 8 px test below (the view's own projection); the ray-cast
+            # only the edges that can pass the 8 px test below (the view's own projection); the ray-cast
             # visibility then runs on these few instead of on every selected edge
             view = st.view._view
             near = st.logic.near_selected_edges(view.persmat, st.view.mw, view.width, view.height,
@@ -1104,7 +1117,7 @@ class PPO_OT_polypen(bpy.types.Operator):
                 return None
             _, _, edge, anchor, radius = min(candidates, key=lambda item: item[:2])
             # several separate chains selected -> the chain under the cursor.
-            # B-1: edge_component + chain_from_edges, kept per selection snapshot and stopped at the first branching
+            # the connected selected edges + chain_from_edges, kept per selection snapshot and stopped at the first branching
             # vertex (see selected_chain), so a hover near a large selection does not walk all of it on every move
             size, found = st.logic.selected_chain(edge)
             if size == 1:
@@ -1224,7 +1237,7 @@ class PPO_OT_polypen(bpy.types.Operator):
         """the segment count the wheel is changing (stroke / strip, or a straight line), else None."""
         if self.stroke_curve is not None:
             return self.stroke_curve.segments
-        try:   # the Curve Pen line: also at 1 segment, where no multi-point preview is drawn
+        try:   # the curve stroke line: also at 1 segment, where no multi-point preview is drawn
             if self.line_world or self._line_anchor() is not None:
                 return self.line_segments
         except (AttributeError, ReferenceError):

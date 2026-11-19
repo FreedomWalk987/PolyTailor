@@ -19,10 +19,10 @@ import os
 from pathlib import Path
 
 import bpy
-from .i18n import tr   # reports in the add-on context
+from .i18n import tr_rpt   # reports in the add-on context
 
 FILE_NAME = "defaults.json"
-SKIP_SCENE = {"pen_mode", "rna_type", "name", "source_object", "source_collection", "defaults_applied", "face_attributes_initialized", "face_attributes_default_off",
+SKIP_SCENE = {"pen_mode", "rna_type", "name", "source_object", "source_collection", "defaults_applied",
               "merge_manual_3d", "merge_manual_topo", "retopo_manual_3d", "retopo_manual_topo",
               "pen3d_prev_snap", "pen3d_prev_merge", "pen3d_prev_clamp", "pen3d_backup_ready"}
 
@@ -37,16 +37,16 @@ FACTORY_SESSION = {
 
 # --- file ---------------------------------------------------------------------------
 
-def _path():
-    try:
-        folder = bpy.utils.extension_path_user(__package__, create=True)
+def _path(create=True):
+    try:   # reading never creates the folder (the Defaults panel looks on every redraw); a save does
+        folder = bpy.utils.extension_path_user(__package__, create=create)
     except (ValueError, AttributeError, OSError):
         return None
     return Path(folder) / FILE_NAME
 
 
 def load():
-    path = _path()
+    path = _path(create=False)
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
     except (OSError, ValueError):
@@ -54,8 +54,23 @@ def load():
     return data if isinstance(data, dict) else {}
 
 
+_saved = [None, False]   # (path, mtime_ns, size) of defaults.json at the last look, and whether it held values
+
+
 def has_saved():
-    return bool(load())
+    """whether saved defaults exist; the file is read again only when it changed (the Defaults panel asks on every
+    redraw)."""
+    path = _path(create=False)
+    try:
+        stat = path.stat() if path else None
+    except OSError:
+        stat = None
+    if stat is None:
+        return False
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if _saved[0] != key:
+        _saved[:] = [key, bool(load())]
+    return _saved[1]
 
 
 def _write(data):
@@ -111,7 +126,7 @@ def _dict_to_group(group, values):
             else:
                 setattr(group, key, value)
         except (TypeError, ValueError, AttributeError):
-            pass   # a setting renamed or removed in a later version
+            pass   # an unknown or invalid saved value is skipped
 
 
 def _reset_group(group):
@@ -155,18 +170,12 @@ def apply_session(ts):
 
 def apply_scene(scene):
     """Copy the saved scene defaults into a scene PolyTailor starts in for the first time."""
-    from .core.face_attributes import initialize
-    initialize(scene)
     settings = scene.ppo
     if settings.defaults_applied:
         return
     settings.defaults_applied = True
     saved = load().get("scene")
     if isinstance(saved, dict):
-        # Defaults saved before 2.2.4 may name a removed Build mode: all are 3in1 now,
-        # and the old Quad mode keeps quads-only faces.
-        if saved.get("polypen_mode") == "QUAD" and "merge3_faces" not in saved:
-            saved = dict(saved, merge3_faces="QUAD")
         _dict_to_group(settings, saved)
 
 
@@ -199,10 +208,10 @@ class PPO_OT_defaults_save(bpy.types.Operator):
         if pen3d:   # 3D turned Stop at Edge off too: keep the real choice
             data["scene"]["clamp_to_source"] = bool(settings.pen3d_prev_clamp)
         if not _write(data):
-            self.report({"ERROR"}, tr("Could not save the defaults"))
+            self.report({"ERROR"}, tr_rpt("Could not save the defaults"))
             return {"CANCELLED"}
         context.scene.ppo.defaults_applied = True
-        self.report({"INFO"}, tr("PolyTailor defaults saved"))
+        self.report({"INFO"}, tr_rpt("PolyTailor defaults saved"))
         return {"FINISHED"}
 
 
@@ -222,7 +231,7 @@ class PPO_OT_defaults_restore(bpy.types.Operator):
             if path is not None and path.exists():
                 path.unlink()
         except OSError:
-            self.report({"ERROR"}, tr("Could not remove the saved defaults"))
+            self.report({"ERROR"}, tr_rpt("Could not remove the saved defaults"))
             return {"CANCELLED"}
         settings = context.scene.ppo
         _reset_group(settings)
@@ -236,7 +245,7 @@ class PPO_OT_defaults_restore(bpy.types.Operator):
             if settings.pen3d:
                 props.begin_pen3d(context.scene)
             props.sync_native_clamp(context)
-        self.report({"INFO"}, tr("PolyTailor factory defaults restored"))
+        self.report({"INFO"}, tr_rpt("PolyTailor factory defaults restored"))
         return {"FINISHED"}
 
 

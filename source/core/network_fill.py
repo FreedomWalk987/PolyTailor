@@ -31,7 +31,7 @@ def metrics(positions, quads):
 
 
 def legacy_fill_steps(points, settings=None):
-    """Released 1.5.0 invocation, remapped to the original CCW boundary indices."""
+    """The main search's fill, remapped to the original CCW boundary indices."""
     p = np.asarray(points, float)
     if p.shape[1] == 2:
         p = np.column_stack((p, np.zeros(len(p))))

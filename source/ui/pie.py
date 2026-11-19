@@ -13,9 +13,23 @@ from ..i18n import CONTEXT
 
 ICONS = Path(__file__).parent.parent / "icons"
 _previews = None
-_keymaps = []
+_keymaps = []   # (keymap name, operator idname) of the W / Shift+W items; keymaps are looked up again by name
 TOOL_ICONS = ("polypen", "fill", "tweak", "relax",
               "pin", "unpin", "glue", "unglue")
+
+
+def vector_dat(name):
+    """the icon's VCO geometry (dark palette): vector/<name>.dat, else (the four toolbar tools) the same bytes in
+    its dark toolbar file named in toolbar_icons.txt."""
+    path = ICONS / "vector" / f"{name}.dat"
+    if path.exists():
+        return path
+    mapping = ICONS / "toolbar_icons.txt"
+    if mapping.exists():
+        names = dict(line.split() for line in mapping.read_text().splitlines() if line.strip())
+        if name in names:
+            return ICONS / f"{names[name]}.dat"
+    return path
 
 
 def light_theme(context=None):
@@ -31,7 +45,7 @@ def _tint_pixels(name, cols, size=32):
     rasterised to straight-alpha float pixels, row 0 at the bottom (the preview / ImBuf order)."""
     import numpy as np
     from . import custom_pie
-    xy, rgba = custom_pie._read_vco(ICONS / "vector" / f"{name}.dat")
+    xy, rgba = custom_pie._read_vco(vector_dat(name))
     src = np.round(rgba[:, :3] * 255).astype(int)
     out = rgba.copy()
     for old, c in (((229, 229, 229), cols[0]), ((130, 130, 130), cols[1]), ((255, 158, 52), cols[2])):
@@ -157,6 +171,21 @@ class PPO_OT_call_pie(bpy.types.Operator):
 
 PIE_BOX_UNITS = 11   # N (snapping + pins) and S (tool settings) boxes share one width
 
+# Short words for the brush mask choices (RNA: "Only Selected"...): one definition for every surface that shows them
+MASK_CHOICE_TEXT = {"mask_selected": {"ALL": "All", "EXCLUDE": "Unselected", "ONLY": "Selected"}}
+
+# Sidebar-only items: the wheel cannot draw them (pointer pickers, bool arrays, lists) or keeps its measured size
+# without them. (owner, property) or ("operator", idname); the derived-objects list and the Shortcuts list are
+# labels. The W wheel and Shift+W never draw these.
+N_ONLY = (("ppo", "source_object"), ("ppo", "source_collection"), ("tool_settings", "use_snap_selectable"),
+          ("ppo", "merge_radius"), ("tool_settings", "use_transform_correct_keep_connected"),
+          ("overlay", "retopology_offset"), ("overlay", "show_wireframes"), ("overlay", "show_fade_inactive"),
+          ("overlay", "fade_inactive_alpha"),
+          ("mirror", "use_axis"), ("mirror", "use_clip"), ("mirror", "use_mirror_merge"),
+          ("mirror", "merge_threshold"), ("mirror", "mirror_object"),
+          ("operator", "ppo.add_mirror"), ("operator", "ppo.defaults_save"), ("operator", "ppo.defaults_restore"),
+          ("operator", "ppo.new_target"))
+
 
 def _section(pie, title, tool_id=None, current=None):
     back = pie.box().column(align=True)
@@ -202,9 +231,26 @@ def draw_masking(context, layout):
         row.prop(scene, second)
 
 
+def draw_brush_settings(context, layout, tool_id):
+    """Relax or Tweak brush: one layout for the W wheel, Shift+W and the sidebar."""
+    scene = props.settings(context)
+    brush = scene.relax if tool_id == "ppo.relax" else scene.tweak
+    col = layout.column()
+    col.prop(brush, "radius")
+    col.prop(brush, "strength", slider=True)
+    col.prop(brush, "falloff", slider=True)
+    reset = col.operator("ppo.brush_reset", text="Reset Brush", text_ctxt="Poly Toolset", icon="LOOP_BACK")
+    reset.tool = "RELAX" if tool_id == "ppo.relax" else "TWEAK"
+    draw_masking(context, col)
+    if tool_id == "ppo.relax":
+        from .panels import draw_relax_algorithm
+        algorithm = col.box().column(align=True)
+        algorithm.label(text="Relax Algorithm", text_ctxt="Poly Toolset")
+        draw_relax_algorithm(context, algorithm)
+
+
 def _settings_section(context, pie, current, maximum=False):
     """Reserve the tool-settings section now; return a function that fills it later (PPO_PT_quick_all.draw)."""
-    scene = props.settings(context)
     if current == "ppo.polypen":
         sec = _section(pie, "Build")
 
@@ -214,26 +260,14 @@ def _settings_section(context, pie, current, maximum=False):
         row = pie.row()
         row.ui_units_x = PIE_BOX_UNITS * 2 + 1
         sections = []
-        for tool_id, title, key in (("ppo.relax", "Relax", "relax"),
-                                    ("ppo.tweak", "Tweak", "tweak")):
+        for tool_id, title in (("ppo.relax", "Relax"), ("ppo.tweak", "Tweak")):
             sec = _section(row, title, tool_id=tool_id, current=current)
             sec.ui_units_x = PIE_BOX_UNITS
-            sections.append((tool_id, sec, getattr(scene, key)))
+            sections.append((tool_id, sec))
 
         def fill():
-            for tool_id, sec, brush in sections:
-                col = sec.column()
-                col.prop(brush, "radius")
-                col.prop(brush, "strength", slider=True)
-                col.prop(brush, "falloff", slider=True)
-                reset = col.operator("ppo.brush_reset", text="Reset Brush", text_ctxt="Poly Toolset", icon="LOOP_BACK")
-                reset.tool = "RELAX" if tool_id == "ppo.relax" else "TWEAK"
-                draw_masking(context, col)
-                if tool_id == "ppo.relax":
-                    from .panels import draw_relax_algorithm
-                    algorithm = col.box().column(align=True)
-                    algorithm.label(text="Relax Algorithm", text_ctxt="Poly Toolset")
-                    draw_relax_algorithm(context, algorithm)
+            for tool_id, sec in sections:
+                draw_brush_settings(context, sec, tool_id)
     elif current == "ppo.fill":
         sec = _section(pie, "Fill")
 
@@ -249,8 +283,12 @@ def _settings_section(context, pie, current, maximum=False):
 
 def draw_selection(context, layout):
     """Selection is independent from snapping and constraint actions."""
+    draw_selection_rows(context, _section(layout, "Select Mode"))
+
+
+def draw_selection_rows(context, mode_sec, n_only=False):
+    """The Select Mode rows of the W wheel and Shift+W; the sidebar (n_only) adds Merge Radius and Keep Connected."""
     ts = context.scene.tool_settings
-    mode_sec = _section(layout, "Select Mode")
     # Explicit labels in both native panels and the custom wheel. The native
     # select-mode operator and the wheel keep their existing Shift extension.
     row = mode_sec.row(align=True)
@@ -266,14 +304,24 @@ def draw_selection(context, layout):
     overlay = getattr(getattr(context, "space_data", None), "overlay", None)
     if overlay is not None and hasattr(overlay, "show_retopology"):
         row.prop(overlay, "show_retopology", text="Retopo Shading", text_ctxt="Poly Toolset", toggle=True)
+    if n_only:
+        mode_sec.prop(props.settings(context), "merge_radius")
     mode_sec.prop(ts, "use_transform_correct_face_attributes", text="Correct Face Attributes",
                   toggle=True, text_ctxt="Poly Toolset Controls")
+    if n_only:
+        row = mode_sec.row()
+        row.active = ts.use_transform_correct_face_attributes
+        row.prop(ts, "use_transform_correct_keep_connected")
 
 
 def draw_snapping(context, layout):
+    draw_snapping_rows(context, _section(layout, "Snapping"))
+
+
+def draw_snapping_rows(context, snap_sec, modes=True):
+    """The Snapping rows of the W wheel and Shift+W; the sidebar draws 3D / Topo at its top instead (modes=False)."""
     ts = context.scene.tool_settings
     scene = props.settings(context)
-    snap_sec = _section(layout, "Snapping")
     row = snap_sec.row(align=True)
     row.prop(ts, "use_snap", text="Snap", text_ctxt="Poly Toolset", toggle=True)   # RNA supplies the on/off icon
     row.prop(scene, "clamp_to_source", text="Stop at Edge", text_ctxt="Poly Toolset", toggle=True,
@@ -282,10 +330,18 @@ def draw_snapping(context, layout):
     row.active = ts.use_snap
     row.prop(ts, "snap_elements_individual", expand=True)
     row = snap_sec.row(align=True)
-    draw_modes(row, scene)
+    if modes:
+        draw_modes(row, scene)
     sub = row.row(align=True)
     sub.active = ts.use_snap
     sub.popover("VIEW3D_PT_snapping", text="Targets", text_ctxt=CONTEXT)
+
+
+def draw_snap_extras(context, layout):
+    """PolyTailor's snapping options next to Blender's Targets: the wheel's Targets popup and the sidebar."""
+    scene = props.settings(context)
+    for name in ("snap_only_selected", "ignore_derived", "snap_self", "use_native_snap"):
+        layout.prop(scene, name)
 
 
 def draw_constraints(context, layout):
@@ -359,16 +415,26 @@ def register():
         km = keyconfig.keymaps.new(name="Mesh", space_type="EMPTY")
         kmi = km.keymap_items.new("ppo.call_pie", "W", "PRESS",
                                  ctrl=False, shift=False, alt=False)
-        _keymaps.append((km, kmi))
+        _keymaps.append((km.name, kmi.idname))
         kmi = km.keymap_items.new("wm.call_panel", "W", "PRESS", shift=True)
         kmi.properties.name, kmi.properties.keep_open = "PPO_PT_quick_all", True
-        _keymaps.append((km, kmi))
+        _keymaps.append((km.name, kmi.idname))
+
+
+def own_keymap_item(kmi):
+    """the W wheel or the Shift+W panel item of PolyTailor."""
+    return kmi.idname == "ppo.call_pie" or (kmi.idname == "wm.call_panel"
+                                            and getattr(kmi.properties, "name", "") == "PPO_PT_quick_all")
 
 
 def unregister():
     global _previews
-    for km, kmi in _keymaps:
-        km.keymap_items.remove(kmi)
+    # the keymap is looked up again: another add-on may have removed the shared "Mesh" keymap (and our items)
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    for name in {name for name, _idname in _keymaps} if keyconfig else ():
+        km = keyconfig.keymaps.get(name)
+        for kmi in [kmi for kmi in km.keymap_items if own_keymap_item(kmi)] if km else ():
+            km.keymap_items.remove(kmi)
     _keymaps.clear()
     bpy.utils.unregister_class(PPO_OT_call_pie)
     bpy.utils.unregister_class(PPO_PT_quick_all)

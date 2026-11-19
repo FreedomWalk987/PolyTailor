@@ -18,14 +18,14 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from .. import prefs, props, palette
+from .. import prefs, palette
 from ..core import draw
 from ..ops.common import active_tool_id
 from . import pie
 from .wheel_geometry import arrange
 from .custom_layout import (Layout, contains, hit, selected, set_choice, enum_selection_text,
                             icon_name, format_label, value_label, numeric_text, parse_numeric)
-from ..i18n import tr as iface_   # add-on context first
+from ..i18n import tr as iface_, tr_rpt   # add-on context first
 
 _active = None
 _registered = False
@@ -55,8 +55,21 @@ def tool_texture(tool, size=16):
     light = pie.light_theme()
     key = f"{tool}@{size}@{int(light)}"
     if key not in _icons:
-        _queue_asset("tool", (tool[4:], size, light))
+        _schedule_asset("tool", (tool[4:], size, light))
     return _icons.get(key)
+
+
+def _live_area(session):
+    """(window, area) of a wheel session, found again among the open windows by pointer; (None, None) when either
+    is gone (a stored Window / Area reference is not cleared when Blender frees it)."""
+    keys = getattr(session, "area_keys", None)
+    wm = getattr(bpy.context, "window_manager", None)
+    for window in (wm.windows if wm is not None and keys else ()):
+        if window.as_pointer() == keys[0]:
+            screen = window.screen
+            area = next((a for a in (screen.areas if screen else ()) if a.as_pointer() == keys[1]), None)
+            return (window, area) if area is not None else (None, None)
+    return None, None
 
 
 def watch_context():
@@ -65,10 +78,10 @@ def watch_context():
     if active is None:
         return None
     try:
-        invalid = (not _registered or active.obj.mode != "EDIT" or active.obj.data != active.mesh or
-                   active.window.view_layer.objects.active != active.obj or
-                   active.area not in list(active.window.screen.areas))
-    except (ReferenceError, AttributeError, RuntimeError):   # a freed window / screen / object
+        window, area = _live_area(active)
+        invalid = (not _registered or area is None or active.obj.mode != "EDIT" or active.obj.data != active.mesh or
+                   window.view_layer.objects.active != active.obj)
+    except (ReferenceError, AttributeError, RuntimeError):   # a removed object
         invalid = True
     if invalid:
         active.restore_drag()
@@ -164,7 +177,7 @@ def _vector_texture(path, size, samples=4, light=False):
     return gpu.types.GPUTexture((size, size), format="RGBA16F", data=buffer)
 
 
-def _queue_asset(kind, key=None):
+def _schedule_asset(kind, key=None):
     job = (kind, key)
     if job not in _warmup_pending:
         _warmup_pending.add(job)
@@ -196,14 +209,14 @@ def request_warmup():
     if not _registered or bpy.app.background:
         return
     if _icon_shader is None:
-        _queue_asset("shader")
+        _schedule_asset("shader")
     # Custom layout fitting may reduce scale on shorter viewports; other sizes
     # are rasterized on first use.
     scale = max(.65, min(1.5, prefs.ui_scale()))
     for name in _TOOL_ICONS:
         light = pie.light_theme()
         if f"ppo.{name}@{icon_px(scale)}@{int(light)}" not in _icons:
-            _queue_asset("tool", (name, icon_px(scale), light))
+            _schedule_asset("tool", (name, icon_px(scale), light))
 
 
 _warmup_idle = [0, 0]   # jobs left at the last tick, ticks without progress
@@ -243,7 +256,7 @@ def _stop_warmup():
 
 def _warmup_draw():
     # One asset per frame, even with several 3D views drawing in the same cycle.
-    # The timer rearms the next step; never drain the entire queue on first W.
+    # The timer rearms the next step; never run every waiting step on first W.
     if not _registered or not _warmup_jobs or not _warmup_ready[0]:
         return
     _warmup_ready[0] = False
@@ -260,7 +273,7 @@ def _warmup_draw():
                 draw.text((-10000, -10000), labels, (0, 0, 0, 0), 11)
         elif kind == "tool":
             name, size, light = key
-            path = pie.ICONS / "vector" / f"{name}.dat"
+            path = pie.vector_dat(name)
             _icons[f"ppo.{name}@{size}@{int(light)}"] = _vector_texture(path, size, light=light) if path.exists() else None
             if _icons[f"ppo.{name}@{size}@{int(light)}"] is not None:
                 paint_icon(_icons[f"ppo.{name}@{size}@{int(light)}"], (-10, -10, -9, -9))
@@ -592,7 +605,7 @@ def icon_colours(style, selected=False):
     settings = prefs.get()
     if getattr(settings, "icon_colours", "CUSTOM") == "CUSTOM":
         acc = tuple(settings.icon_accent)
-        if palette.close(acc, palette.DARK) or palette.close(acc, palette.LEGACY):   # default follows 主題色
+        if palette.close(acc, palette.DARK):   # default follows 主題色
             acc = (*palette.accent()[:3], acc[3])
         return tuple(settings.icon_main), tuple(settings.icon_dim), acc, 0.0
     ui = bpy.context.preferences.themes[0].user_interface
@@ -758,6 +771,7 @@ class WheelSession:
         self.operator = operator
         self.wm = context.window_manager
         self.window, self.area, self.region = context.window, context.area, context.region
+        self.area_keys = (self.window.as_pointer(), self.area.as_pointer())   # for watch_context / close
         self.obj = context.edit_object
         self.mesh = self.obj.data
         self.size = (self.region.width, self.region.height)
@@ -769,11 +783,11 @@ class WheelSession:
         self.popup_max_scroll = 0
         self.drag = self.edit = None
         self.press = None
-        self.last_click = None   # W-2: (widget key, popup source) of the last click that acted on a widget
+        self.last_click = None   # (widget key, popup source) of the last click that acted on a widget
         self.numeric_click = None
         self.status = ""
         self.closed = False
-        self.trigger = key_trigger(event)   # W-1: the (rebindable) key that opened the wheel; None for a click
+        self.trigger = key_trigger(event)   # the (rebindable) key that opened the wheel; None for a click
         self.held = event.type == self.trigger
         self.started = time.monotonic()
         self.hover_started = self.started
@@ -867,9 +881,7 @@ class WheelSession:
                 root.children.append(child)
             extra = root.box().column(align=True)
             extra.label(text="PolyTailor", text_ctxt="Poly Toolset")
-            scene = props.settings(context)
-            for name in ("snap_only_selected","ignore_derived","snap_self","use_native_snap"):
-                extra.prop(scene,name)
+            pie.draw_snap_extras(context, extra)   # the same rows as the sidebar's Snapping
         else:
             cls = getattr(bpy.types, source.idname)
             root.label(text=cls.bl_label, text_ctxt="Poly Toolset")
@@ -925,10 +937,9 @@ class WheelSession:
             self.timer = None
         if _active is self:
             _active = None
-        try:
-            self.area.tag_redraw()
-        except ReferenceError:
-            pass
+        _window, area = _live_area(self)
+        if area is not None:   # the area is still open
+            area.tag_redraw()
 
     def cancel(self, context):
         self.restore_drag()
@@ -1030,7 +1041,7 @@ class WheelSession:
             traceback.print_exc()
             self.restore_drag()
             self.close()
-            self.operator.report({"ERROR"},iface_("PolyTailor Wheel error; see console"))
+            self.operator.report({"ERROR"},tr_rpt("PolyTailor Wheel error; see console"))
             return {"CANCELLED"}
 
     def handle_event(self, context, event):
@@ -1136,7 +1147,7 @@ class WheelSession:
                     self.edit = (node,numeric_text(node,getattr(node.owner,node.name)),True)
                     self.area.tag_redraw()
                 return {"RUNNING_MODAL"}
-            # W-2: the widget just clicked, clicked again quickly (a toggle), with the same popup state: the second
+            # the widget just clicked, clicked again quickly (a toggle), with the same popup state: the second
             # click is a press like the first. Anything else (another widget, a popup closed or opened in between)
             # is swallowed as a plain double click.
             last, self.last_click = getattr(self, "last_click", None), None
@@ -1154,7 +1165,7 @@ class WheelSession:
                 self.drag = (node,value,float(value),self.mouse[0])
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "RELEASE":
-            clicked = None   # W-2: recorded before the click acts (it may open or close a popup)
+            clicked = None   # recorded before the click acts (it may open or close a popup)
             if self.drag:
                 node,original,current,_ = self.drag
                 previous = self.numeric_click
@@ -1433,7 +1444,15 @@ class PPO_OT_persistent_pie(bpy.types.Operator):
 
     def invoke(self, context, event):
         self.session = WheelSession()
-        return self.session.invoke(context,event,self)
+        result = self.session.invoke(context,event,self)
+        p = prefs.get(context)
+        if "RUNNING_MODAL" in result and getattr(p, "wheel_open_count", 3) < 3:
+            p.wheel_open_count += 1   # the sidebar's W hint hides after the third open
+            try:
+                context.preferences.is_dirty = True   # kept with the preferences when they are saved
+            except (AttributeError, TypeError):
+                pass
+        return result
 
     def modal(self, context, event):
         return self.session.modal(context,event)

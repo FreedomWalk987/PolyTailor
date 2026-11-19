@@ -284,7 +284,7 @@ def optimise(X, F, n, sweeps=40, target=0.35):
         _check_budget()
         tangled = q.min() <= SJ_EPS
         if tangled and sw < 6:
-            # v5: untangling may need good vertices to move, but only near the folds: 3 rings around bad faces
+            # untangling may need good vertices to move, but only near the folds: 3 rings around bad faces
             badf = np.nonzero(q <= SJ_EPS)[0]
             reg = {v for k in badf for v in F[k]}
             for _ in range(3):
@@ -569,7 +569,7 @@ _EST = {}
 
 
 def fill2d(P, scales=SCALES, budget_s=None, cancel=None):
-    """v5: returns the best valid mesh found within the budget.
+    """Returns the best valid mesh found within the budget.
     * Tight budget (estimated plain cost > half the budget) and a strictly star-shaped rim: the kernel-star template
       runs FIRST (cheap, provably valid), so a valid answer exists early; the normal plans then try to beat it.
       Coarsening the interior against a dense rim was tried and rejected: it creates rim ears and fails.
@@ -652,7 +652,7 @@ def fill2d(P, scales=SCALES, budget_s=None, cancel=None):
     raise FillRefused('fallback: no valid mesh (%s)' % '; '.join(errs))
 
 
-# ------------------------------------------------------------------ v5: rim-safe pairing of leftover triangles
+# ------------------------------------------------------------------ rim-safe pairing of leftover triangles
 def _fixed_bad_face(X, f, n):
     k = len(f)
     for i in range(k):
@@ -769,7 +769,7 @@ def merge_pairs_safe(X, F, n, max_tries=6, fixed_n=None):
     return m.V, Fo, merged
 
 
-# ------------------------------------------------------------------ v5: kernel-star template (last resort, provably valid)
+# ------------------------------------------------------------------ kernel-star template (last resort, provably valid)
 def kernel_point(P):
     """Centroid of the polygon's kernel (intersection of the left half-planes of all edges), or None when the
     rim is not strictly star-shaped. Sutherland-Hodgman clipping of the bbox, O(n^2)."""

@@ -10,7 +10,7 @@ from itertools import chain
 import bmesh
 import bpy
 import numpy as np
-from ..i18n import tr as iface_, friendly_error   # add-on context first; friendly_error
+from ..i18n import tr as iface_, tr_rpt, friendly_error   # add-on context first; friendly_error
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Vector
 from mathutils.geometry import intersect_point_line
@@ -332,7 +332,7 @@ class BrushStroke:
                 continue
             if boundary_mode == "EXCLUDE" and is_boundary(bmv, self.clip):
                 continue
-            if any(bmv[layer] > 0.5 for layer in pin_layers):  # same pin/legacy layers
+            if any(bmv[layer] > 0.5 for layer in pin_layers):  # same pin layers
                 continue
             if not include_corners and (len(bmv.link_edges) == 2 or
                     (len(bmv.link_edges) == 4 and len(bmv.link_faces) == 3)):
@@ -483,7 +483,7 @@ class PPO_OT_tweak(bpy.types.Operator):
         button = getattr(self, "button", "LEFTMOUSE")
         cancel = {"ESC", "LEFTMOUSE" if button == "RIGHTMOUSE" else "RIGHTMOUSE"}
         if self.stroke.stale():   # a vertex Tweak wrote changed under it: stop, no rollback
-            self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+            self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
             self.stroke.drag(event)
@@ -492,7 +492,7 @@ class PPO_OT_tweak(bpy.types.Operator):
             return {"FINISHED"}
         elif event.type == "WINDOW_DEACTIVATE" or (event.type in cancel and event.value == "PRESS"):
             if not safe_mesh.restore_allowed(self, context) or self.stroke.restore():   # Rc4
-                self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         return {"RUNNING_MODAL"}
 
@@ -850,10 +850,10 @@ class PPO_OT_relax(bpy.types.Operator):
             return {"FINISHED"}
         if event.type == "WINDOW_DEACTIVATE" or (event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS"):
             if not safe_mesh.restore_allowed(self, context):   # keep outside edits
-                self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
                 return {"CANCELLED"}   # timer and stroke go with the operator teardown; nothing written
             if self._end(context, restore=True):   # an outside edit of a Relaxed vertex was kept
-                self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         if event.type != "TIMER" and bool(event.ctrl) != self.dragging:
             self.dragging = bool(event.ctrl)
@@ -1061,7 +1061,7 @@ class PPO_OT_smooth_selection(bpy.types.Operator):
             self._wheel(event.type)
         except Exception as exc:
             self.cancel(context)
-            self.report({"ERROR"}, iface_(friendly_error(exc, "Relax could not continue here")))
+            self.report({"ERROR"}, tr_rpt(friendly_error(exc, "Relax could not continue here")))
             return {"CANCELLED"}
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -1094,7 +1094,7 @@ class PPO_OT_smooth_selection(bpy.types.Operator):
                         co = self.stroke.snap_to_boundary(co)
                     v.co = self.stroke.clip.apply(original, co)
                 written = [v for v, _co, _w in self.stroke.verts]
-                # R-1: what Esc compares against (restore_written), as the solver steps record it
+                # what Esc compares against (restore_written), as the solver steps record it
                 self.stroke.note_written(written, np.array([v.co[:] for v in written]))
                 from ..core.face_attributes import apply
                 apply(self.stroke, written)
@@ -1115,7 +1115,7 @@ class PPO_OT_smooth_selection(bpy.types.Operator):
             for v, co in frame.items():
                 v.co = co
             written = list(frame)
-            # R-1: what Esc compares against (restore_written) is now this frame
+            # what Esc compares against (restore_written) is now this frame
             self.stroke.note_written(written, np.array([v.co[:] for v in written]))
             from ..core.face_attributes import apply
             apply(self.stroke, moved)
@@ -1124,7 +1124,7 @@ class PPO_OT_smooth_selection(bpy.types.Operator):
     def modal(self, context, event):
         if (event.value == "PRESS" and (event.type in {"ESC", "RIGHTMOUSE"} or (event.type == "WHEELDOWNMOUSE" and self.frames))
                 and not safe_mesh.restore_allowed(self, context)):   # keep outside edits
-            self.report({"WARNING"}, iface_("The mesh being edited changed; the tool stopped"))
+            self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
             return {"CANCELLED"}
         down = self.__dict__.get("_alt_lmb")
         if down is not None and event.type == "MOUSEMOVE":   # an Alt+drag ends the smoothing
@@ -1137,7 +1137,7 @@ class PPO_OT_smooth_selection(bpy.types.Operator):
                 self._wheel(event.type)
             except Exception as exc:
                 self.cancel(context)
-                self.report({"ERROR"}, iface_(friendly_error(exc, "Relax could not continue here")))
+                self.report({"ERROR"}, tr_rpt(friendly_error(exc, "Relax could not continue here")))
                 return {"CANCELLED"}
         elif event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
             self.cancel(context)

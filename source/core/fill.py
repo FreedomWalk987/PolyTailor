@@ -193,8 +193,7 @@ def _planar_faces(edges):
 
 
 class ClosedLoop(list):
-    """2.6.2: a loop closed through an existing edge (2.6.3: or a straight run of them; see closing_chain);
-    a cache only."""
+    """a loop closed through an existing edge or a straight run of them (see closing_chain); a cache only."""
 
 
 def _path(edges):
@@ -227,7 +226,7 @@ def _rim_edges(loop):
 
 
 def _covers(loop, chain):
-    """target guard: a face on the rim (open rim edges and the closing chain's edges, 2.6.3) that is
+    """target guard: a face on the rim (open rim edges and the closing chain's edges) that is
     nearly coplanar with the loop and lies inside it means the loop would cover existing geometry."""
     from mathutils import geometry
     co = np.array([tuple(v.co) for v in loop], dtype=np.float64)
@@ -363,7 +362,7 @@ def closing_chain(loop):
     """the rim edges of the loop's single contiguous run of non-open edges, when every other rim
     edge is open (at least 2), every chain edge is usable, the run is straight and advances monotonically
     from its first to its last vertex, its middle vertices have no open edges, and the loop does not cover
-    existing geometry; else None. A run of one edge is exactly 2.6.2's closing edge. Derived from the
+    existing geometry; else None. A run of one edge is a single closing edge. Derived from the
     mesh, so any copy of a loop gives the same answer."""
     n = len(loop)
     if n < 3 or len(set(loop)) != n:
@@ -902,7 +901,7 @@ DIRECT_SECONDS = .25   # work-clock cap of the instant direct grid (it takes abo
 def direct_steps(world, settings):
     """The instant direct grid of an even rim: the lattice (the surrounding quads' turns, then the outline's own
     angles), else four balanced corners. Only a pole-free grid counts. It is finished as solve_steps finishes its
-    pick and marked _direct. None when neither gives one. Searches nothing else (the Legacy search runs as before)."""
+    pick and marked _direct. None when neither gives one. Searches nothing else (the main search runs as before)."""
     pts = np.asarray(world, dtype=np.float64)
     n = len(pts)
     if n < 4 or n % 2 or n > MAX_POINTS or pts.shape != (n, 3) or not np.isfinite(pts).all():
@@ -1062,7 +1061,12 @@ def certain_fail(world):
 
 
 def project_steps(context, plan, srcs):
-    """Project cooperatively and check the final geometry, not just the flat seed."""
+    """Project cooperatively and check the final geometry, not just the flat seed. A plan planned on the outline's
+    flat positions on the source (fill_surface) is mapped back onto the source instead."""
+    from . import fill_surface
+    surface = fill_surface.planned_on(plan)
+    if surface is not None:
+        return (yield from surface.map_steps(plan))
     from mathutils import Vector
     from . import raycast
     pos = plan["positions"]
@@ -1197,8 +1201,8 @@ def commit(bm, mw, loop, plan, view_dir, correct_attributes=True):
         flip = direction
     if flip is None and chain:
         # opposite to the faces across the closing chain that are nearly coplanar with the loop;
-        # every such face votes; when they disagree the strictly most coplanar face decides (2.6.2's
-        # rule), and on a tie the view decides
+        # every such face votes; when they disagree the strictly most coplanar face decides, and on a tie
+        # the view decides
         from mathutils import geometry
         n = _frame(np.array([tuple(v.co) for v in loop], dtype=np.float64))[3]
         votes, ranked = set(), []

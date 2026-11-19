@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""PS-1 ranker: plain Python (no numpy), deterministic, order-independent.
+"""Feature ranker: plain Python (no numpy), deterministic, order-independent.
 
     order = ps1_rank(candidates, params=None)
 
@@ -17,14 +17,14 @@ candidate = dict with
     padding  int   (default 0)  Takayama padding of the template, tie-break only
 
 Result `order` = indices into `candidates` (best first) of every VALID candidate:
-    block 1  gate-passing, not Pareto-dominated   (sorted by the PS-1 lexicographic key)
+    block 1  gate-passing, not Pareto-dominated   (sorted by the lexicographic key below)
     block 2  gate-passing, Pareto-dominated       (same key)
     block 3  valid but below the minQ floor       (sorted by -round(minQ,6), then poles, D, -padding, faces, id)
 If no valid candidate passes the floor: block 3 only (order[0] is a labelled below-floor fallback).
 
-The PS-1 key of a gate-passing, non-dominated candidate c is
+The key of a gate-passing, non-dominated candidate c is
     ( band(D_c), P_c, flag(c), -round(Q_c,6), [c is not the reference], -padding_c, faces_c, id_c )
-The reference (optional `reference_id`, e.g. the independent legacy/search plan, as in fill_flow.guarded_choice)
+The reference (optional `reference_id`, e.g. the independent main-search plan, as in fill_flow.guarded_choice)
 wins every exact tie through Q; padding, faces and the geometry id only separate candidates that tie with
 each other and with the reference.
     band(D) = floor((D - Dmin)/w + 1e-9)          Dmin = min D over block-1 candidates

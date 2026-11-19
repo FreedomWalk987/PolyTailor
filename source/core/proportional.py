@@ -59,20 +59,20 @@ class Influence:
                 length = (world[i]-world[j]).length
                 adj[i].append((j, length)); adj[j].append((i, length))
             distances = [math.inf]*len(verts)
-            queue = []
+            frontier = []
             for v in selected:
                 i = index[v]; distances[i] = 0.0
-                queue.append((0.0, i))
-            heapq.heapify(queue)
-            while queue:
-                distance, i = heapq.heappop(queue)
+                frontier.append((0.0, i))
+            heapq.heapify(frontier)
+            while frontier:
+                distance, i = heapq.heappop(frontier)
                 if distance != distances[i]:
                     continue
                 for j, length in adj[i]:
                     candidate = distance+length
                     if candidate < distances[j]:
                         distances[j] = candidate
-                        heapq.heappush(queue, (candidate, j))
+                        heapq.heappush(frontier, (candidate, j))
         else:
             origin = world[index[next(iter(selected))]]
             points = [p-origin for p in world]

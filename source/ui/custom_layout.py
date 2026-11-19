@@ -103,7 +103,8 @@ class Layout:
         return self.add("separator")
 
     def label(self, text="", **kwargs):
-        return self.add("label", text=format_label(text), icon=kwargs.get("icon",""),
+        ctxt = kwargs.get("text_ctxt", "*")   # a specific context (Faces, Controls, Select Mode) as in native panels
+        return self.add("label", text=format_label(text, "*" if ctxt == "Poly Toolset" else ctxt), icon=kwargs.get("icon",""),
                         heading=not self.children and self.parent is not None and self.parent.kind=="box")
 
     def operator(self, idname, text=None, **kwargs):
@@ -124,9 +125,10 @@ class Layout:
         text = kwargs.get("text", rna.name)
         if rna.type == "ENUM" and kwargs.get("expand"):
             group = self.add("row" if self.kind == "row" else "column",align=True)
+            from .pie import MASK_CHOICE_TEXT   # the same short words wherever the choices are shown as text
+            short = MASK_CHOICE_TEXT.get(name, {})
             for item in rna.enum_items:
                 if item.identifier:
-                    short = {"ALL":"All", "EXCLUDE":"Unselected", "ONLY":"Selected"} if name=="mask_selected" else {}
                     group.add("choice", owner=owner, name=name, value=item.identifier,
                               text=format_label(short.get(item.identifier,item.name or item.identifier),
                                                 getattr(rna, "translation_context", "") or "*"),

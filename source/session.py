@@ -50,10 +50,11 @@ _TOOL = ("use_snap", "snap_elements", "use_snap_self", "use_snap_edit",
          "use_transform_correct_keep_connected")  # Topo sets it; restored on leave
 # use_mesh_automerge: the user's own value is backed up with these (_SCENE_BACKUP) and restored on leaving;
 # inside PolyTailor it is managed per tool and mode, see AUTOMERGE_TOOL / wanted_merge
-_SCENE_BACKUP = _TOOL + ("use_mesh_automerge",)   # what entering backs up and leaving / a save puts back
+_SCENE_BACKUP = _TOOL + ("use_mesh_automerge",)   # what entering backs up and leaving puts back
 # The snap target filters PolyTailor sets while it is active. Found exactly like
-# this on entry, they were left behind (a file saved by an earlier version while a
-# PolyTailor tool was active): restore Blender's defaults instead of keeping them.
+# this on entry, they were left behind (a file saved while a PolyTailor tool was active): Blender's
+# targets instead. With the Topo entry's merge distance and Keep Connected as well, every
+# backed-up tool setting gets Blender's default (_whole_set_left_behind).
 _OWN_TARGETS = {"use_snap_self": False, "use_snap_edit": False, "use_snap_nonedit": True,
                 "use_snap_to_same_target": True}
 _BLENDER_TARGETS = {"use_snap_self": True, "use_snap_edit": True, "use_snap_nonedit": True,
@@ -64,19 +65,46 @@ def _left_behind(values):
     return all(values.get(name) == value for name, value in _OWN_TARGETS.items())
 
 
+def _whole_set_left_behind(scene, values):
+    """the Topo entry's other fingerprints next to the snap targets: its merge distance and Keep Connected"""
+    scale = scene.unit_settings.scale_length or 1.0
+    distance = values.get("double_threshold")
+    return (values.get("use_transform_correct_keep_connected") is True and isinstance(distance, float)
+            and math.isclose(distance, MERGE_THRESHOLD_M / scale, rel_tol=1e-4))
+
+
+def _blender_defaults(tool_settings, names):
+    """Blender's default of each named tool setting (the snap targets: _BLENDER_TARGETS)."""
+    rna = tool_settings.bl_rna.properties
+    values = {}
+    for name in names:
+        prop = rna.get(name)
+        if prop is None:
+            continue
+        if prop.type == "ENUM" and prop.is_enum_flag:
+            values[name] = set(prop.default_flag)
+        elif getattr(prop, "is_array", False):
+            values[name] = tuple(prop.default_array)
+        else:
+            values[name] = prop.default
+    values.update((name, value) for name, value in _BLENDER_TARGETS.items() if name in names)
+    return values
+
+
 def ensure_backup(scene):
     """the user's own values (_SCENE_BACKUP) are backed up before PolyTailor's first write to the scene's tool
     settings: every writer calls this first. The entry setup uses the same backup (kept in _pending until the scene
     is managed), so a write before it, or an entry that failed midway, never makes PolyTailor's value the one
-    restored on leaving or written by a save."""
+    restored on leaving."""
     key = scene.session_uid
     if key in _scenes or key in _pending:
         return
     values = _snapshot(scene.tool_settings, _SCENE_BACKUP)
     if _left_behind(values):
-        values.update(_BLENDER_TARGETS)
+        values.update(_blender_defaults(scene.tool_settings, values) if _whole_set_left_behind(scene, values)
+                      else _BLENDER_TARGETS)
     _pending[key] = values
-    _track_file_handlers()   # a save from now on writes these values into the file
+    _track_file_handlers()   # a file load from now on puts these values back and clears the session
 
 
 def _snapshot(target, names):
@@ -336,7 +364,7 @@ _again = [None]     # a later look asked for while it runs: its delay
 
 
 def sync():
-    """one look at the views and scenes. Run by events only (msgbus notifies, PolyTailor operators, save / load,
+    """one look at the views and scenes. Run by events only (msgbus notifies, PolyTailor operators, file load,
     later()); never a timer of its own. It never raises."""
     try:
         _sync()
@@ -445,8 +473,8 @@ def _ppo_modal():
 
 
 def _set_in_use(on):
-    """the depsgraph / undo handlers, the draw handlers (pins, snap marker, HUD), the brush cursor and Edit Mode
-    Auto-Save's timer PolyTailor needs only while in use."""
+    """the depsgraph / undo handlers, the draw handlers (pins, snap marker, HUD) and the brush cursor PolyTailor
+    needs only while in use."""
     if on == _in_use[0]:
         return
     _in_use[0] = on
@@ -456,11 +484,10 @@ def _set_in_use(on):
         if _after_load[0]:   # the first entry after a file load: its sources are warmed again
             _after_load[0] = False
             raycast._warm.clear()
-    from . import edit_autosave
     from .core import brush_cache, safe_mesh, snap
     from .ops import brush, pinning
     from .ui import hud
-    for module in (brush_cache, safe_mesh, pinning, snap, hud, brush, edit_autosave):
+    for module in (brush_cache, safe_mesh, pinning, snap, hud, brush):
         try:
             (module.start if on else module.stop)()
         except Exception as exc:
@@ -480,7 +507,6 @@ def ensure(every=True):
     """a PolyTailor operator starts: one look now (the session follows events only: an undo back into Edit Mode, an
     area split, the Retopology Offset for the current zoom). every=False: an operator invoked on every mouse move
     (the brush cursor tracker) looks only while PolyTailor is not in use yet."""
-    props.migrate_scene(bpy.context.scene)   # an old Build mode, before the operator reads it (see props.settings)
     if every or not _in_use[0]:
         apply_now()
     if every:
@@ -543,7 +569,7 @@ def _sync_state(seen_views):
                             worker.prewarm()
                         from .ui.pie import AVAILABLE_TOOLS
                         if tool not in AVAILABLE_TOOLS:
-                            # Saved workspaces can retain a tool from an older release.
+                            # A workspace can name a PolyTailor tool that is not registered: Build is used.
                             bpy.ops.wm.tool_set_by_id(name=AUTOMERGE_TOOL, space_type="VIEW_3D")
                             tool = AUTOMERGE_TOOL
                     scene = context.scene
@@ -650,7 +676,7 @@ def _sync_state(seen_views):
         for key in gone_views:
             if in_use and key in spaces and key not in shown:
                 # a view of a workspace no window shows (another workspace tab): it keeps its backup and look
-                # while PolyTailor is in use, and is restored once it is not (or for a save, _hold_for_save)
+                # while PolyTailor is in use, and is restored once it is not
                 continue
             _restore_view(key, _views.pop(key), spaces)
             _view_look.pop(key, None)
@@ -775,8 +801,8 @@ def apply_topo_defaults(context, scene=None, reset_view=False):
     ts.use_snap_to_same_target = True
     ts.use_snap_translate = True
     ts.double_threshold = MERGE_THRESHOLD_M/(scene.unit_settings.scale_length or 1.0)
-    # Correct Face Attributes is left as it is: off by default in 3D and Topo alike
-    # (core.face_attributes.initialize), and a manual choice survives mode switches.
+    # Correct Face Attributes is left as it is: off by default in 3D and Topo alike,
+    # and a manual choice survives mode switches.
     ts.use_transform_correct_keep_connected = True   # session-managed (_TOOL), restored on leave
     props.sync_native_clamp(context, scene)
     if reset_view:
@@ -791,69 +817,8 @@ def activate_mode(context):
     sync()
 
 
-_save_hold = [None]   # the live session values held across a save (save_pre -> save_post)
-
-
-def _any_edit_mode():
-    """any object in Edit Mode (any scene). An error counts as yes (never touch the mode)."""
-    try:
-        return any(obj.mode == "EDIT" for obj in bpy.data.objects)
-    except Exception:
-        return True
-
-
-def _hold_for_save():
-    """the file gets the user's own settings (as before), the session keeps its live ones:
-    snapshot the LIVE values PolyTailor manages (overlay, snapping and Auto Merge, selection mode), then write the
-    user's values. Nothing is forgotten, so save_post puts the live values back exactly.
-    while ANY object is in Edit Mode the selection mode is never touched (save_pre or
-    save_post): its RNA write runs Blender's select-mode change on the edit mesh (EDBM_selectmode_set), which drops the
-    vertex / edge selection of a Face- or Edge-mode user, live and in the saved file. The file then keeps the live mode
-    and every element's selection exactly, in all three modes."""
-    spaces = _live_spaces()
-    views, scenes, modes = {}, {}, {}
-    _save_hold[0] = (views, scenes, modes)   # filled in place: a failure midway still restores what was changed
-    for key, values in _views.items():
-        space = spaces.get(key)
-        if space is not None:
-            views[key] = _snapshot(space.overlay, _OVERLAY)
-            _apply(space.overlay, values)
-    for uid, values in list(_scenes.items()) + list(_pending.items()):
-        scene = _scene_by_uid(uid)
-        if scene is not None:
-            ts = scene.tool_settings
-            scenes[uid] = _snapshot(ts, _SCENE_BACKUP)
-            _apply(ts, values)   # the saved file: the user's own snapping and Auto Merge
-    for uid, value in (() if _any_edit_mode() else _selection_modes.items()):
-        scene = _scene_by_uid(uid)
-        if scene is not None:
-            modes[uid] = tuple(scene.tool_settings.mesh_select_mode)
-            scene.tool_settings.mesh_select_mode = value
-
-
-def _release_hold():
-    """after the save, the live session values back verbatim (no re-forced selection mode).
-    a selection mode is put back only where save_pre swapped it (never in Edit Mode)."""
-    held, _save_hold[0] = _save_hold[0], None
-    if held is None:
-        return
-    views, scenes, modes = held
-    spaces = _live_spaces()
-    for key, values in views.items():
-        _restore_view(key, values, spaces)
-    for uid, values in scenes.items():
-        scene = _scene_by_uid(uid)
-        if scene is not None:
-            _apply(scene.tool_settings, values)
-    for uid, value in modes.items():
-        scene = _scene_by_uid(uid)
-        if scene is not None and tuple(scene.tool_settings.mesh_select_mode) != value:
-            scene.tool_settings.mesh_select_mode = value
-
-
 def _release_file_state():
     """Put the closing file's viewport / tool settings back and forget them."""
-    _save_hold[0] = None
     spaces = _live_spaces()
     for key, values in list(_views.items()):
         _restore_view(key, values, spaces)
@@ -883,41 +848,9 @@ def _on_load_pre(*_args):
     _release_file_state()
 
 
-@bpy.app.handlers.persistent
-def _on_save_pre(*_args):
-    # Save the user's own snapping / overlay / selection-mode settings, not PolyTailor's temporary
-    # ones; the session's live values are held and put back verbatim at save_post.
-    _hold_for_save()
-
-
-@bpy.app.handlers.persistent
-def _on_save_post(*_args):
-    try:   # a save of the user's own file starts Edit Mode Auto-Save's interval again (not its own copies)
-        from . import edit_autosave
-        edit_autosave.saved(*_args)
-    except Exception as exc:
-        _log_once("save", exc)
-    _on_save_post_fail(*_args)
-
-
-@bpy.app.handlers.persistent
-def _on_save_post_fail(*_args):
-    """after a save (also a failed one: save_post_fail): the live values back, one look. A failed save leaves Edit
-    Mode Auto-Save's interval and change mark alone (its unsaved changes still need a copy)."""
-    _in_save_post[0] = True
-    try:
-        try:
-            _release_hold()
-        finally:
-            apply_now()   # re-apply at once after the save
-    finally:
-        _in_save_post[0] = False
-
-
-# The save / load handlers above exist only while a session is open (PolyTailor in use, or something still to
-# restore): a save then writes the user's own values into the file, a load restores the closing file's values,
-# an undo / redo is followed by one look (_on_undo).
-_in_save_post = [False]   # Blender is running the save_post / save_post_fail list: its entries are not removed now
+# The load / undo handlers exist only while a session is open (PolyTailor in use, or something still to restore):
+# a load restores the closing file's values and clears the session, an undo / redo is followed by one look (_on_undo).
+# A save has no handler: the file keeps the settings as they are at that moment.
 
 
 def _session_open():
@@ -926,11 +859,7 @@ def _session_open():
 
 def _file_handlers():
     handlers = bpy.app.handlers
-    pairs = [(handlers.load_pre, _on_load_pre), (handlers.save_pre, _on_save_pre), (handlers.save_post, _on_save_post),
-             (handlers.undo_post, _on_undo), (handlers.redo_post, _on_undo)]
-    if hasattr(handlers, "save_post_fail"):
-        pairs.append((handlers.save_post_fail, _on_save_post_fail))
-    return pairs
+    return [(handlers.load_pre, _on_load_pre), (handlers.undo_post, _on_undo), (handlers.redo_post, _on_undo)]
 
 
 @bpy.app.handlers.persistent
@@ -939,13 +868,8 @@ def _on_undo(*_args):
 
 
 def _track_file_handlers(off=False):
-    """added while a session is open, removed when nothing is left (off: always removed, unregister). Never removed
-    while Blender runs save_post: a handler removing itself from the list being run makes Blender skip the next
-    handler (another add-on's); a one-shot look right after the save removes them."""
+    """added while a session is open, removed when nothing is left (off: always removed, unregister)."""
     on = not off and _session_open()
-    if not on and _in_save_post[0]:
-        later()
-        return
     for handlers, callback in _file_handlers():
         try:
             if on and callback not in handlers:
@@ -990,15 +914,6 @@ def _subscribe():
 def _on_load_post(*_args):
     _after_load[0] = True
     _entry_fingerprint[0] = None
-    try:   # the closing file's queued Build-mode migrations (props._pending) are dropped
-        props.forget_migrations()
-    except Exception as exc:
-        _log_once("load", exc)
-    try:   # an opened Edit Mode Auto-Save copy: one message naming its original file
-        from . import edit_autosave
-        edit_autosave.loaded()
-    except Exception as exc:
-        _log_once("load", exc)
     _subscribe()
     apply_now()
 
@@ -1009,7 +924,7 @@ def register():
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     later()   # one look: enabled (or reloaded) inside a PolyTailor tool
-    # the save / load handlers: added by the session while it is open (_track_file_handlers)
+    # the load / undo handlers: added by the session while it is open (_track_file_handlers)
     if hasattr(bpy.app.handlers, "exit_pre") and _on_exit_pre not in bpy.app.handlers.exit_pre:
         bpy.app.handlers.exit_pre.append(_on_exit_pre)
 

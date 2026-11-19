@@ -9,7 +9,7 @@ Release notes: [CHANGELOG.md](CHANGELOG.md).
 ## Overview
 
 - **Build** - draw new faces, edges and vertices: hold Ctrl to preview, Ctrl+click to add,
-  keep dragging to place. One mode; **Faces: Tri/Quad** or **Quad**; with one selected vertex
+  keep dragging to place. **Faces: Tri/Quad** or **Quad**; with one selected vertex
   Ctrl+drag draws a curve stroke; Ctrl+drag near a selected edge chain sweeps a quad strip.
 - **Fill** - fill existing holes or closed wire outlines, reusing their vertices.
   Select one closed outline or hover a hole; hold Ctrl for the preview. Fill looks for several
@@ -31,10 +31,6 @@ Release notes: [CHANGELOG.md](CHANGELOG.md).
 - **MMB Tool Switch** (on by default) - click the middle mouse button to switch between Build
   and the brushes; Ctrl+click it to switch between Build and Fill. Dragging with MMB still
   orbits the view, and Ctrl+MMB drag still zooms.
-- **Edit Mode Auto-Save** (off by default) - Blender's own Auto Save does not run while you stay
-  in Edit Mode. With this option on, PolyTailor saves an auto-save copy while you use its tools,
-  so File > Recover > Auto Save still finds your work. It saves only when Blender's Auto Save is
-  turned on, at the same interval, and only after something has changed.
 
 **3D or Topo mode** - **3D** models your own mesh, **Topo** retopologizes over another model (see 3D / Topo).
 
@@ -56,9 +52,10 @@ Extension ID: `polytailor`.
 
 ## Getting started
 
-- Object Mode: Shift+A > Mesh > **Retopology at Cursor** / **Retopology from Active**
-  (also in the sidebar's PolyTailor tab). An empty mesh is created, Edit Mode and Build
-  start, and Ctrl+click on the model places the first vertex.
+- Object Mode: Shift+A > Mesh > **New Mesh (3D)** / **Retopology Mesh (Topo)** (also in the
+  sidebar's PolyTailor tab). New Mesh (3D) adds an empty mesh at the 3D Cursor in 3D mode;
+  Retopology Mesh (Topo) adds one on the active object in Topo mode and sets Sidebar > Sources
+  to that object. Edit Mode and Build start, and Ctrl+click places the first vertex.
 - Any visible mesh (or curve / text with faces) in Object Mode is a *source*: new and
   moved points land on it while snapping (the magnet) is on.
 
@@ -66,7 +63,7 @@ Extension ID: `polytailor`.
 
 | Tool | Use |
 |---|---|
-| **Build** | Hold Ctrl to preview, Ctrl+click to add, keep dragging to place. One mode (Faces: Tri/Quad or Quad; one selected vertex: curve stroke; Ctrl+drag near a selected edge or edge chain: quad strip). Keep Ctrl held to continue. **Alt+Wheel** relaxes the selection (wheel down steps back, release Alt to confirm); its method (Brush Relax, Grid Relax, LoopTools Relax, Native) is in Build's settings and the tool header's **Alt+Wheel Smooth** menu. |
+| **Build** | Hold Ctrl to preview, Ctrl+click to add, keep dragging to place. Faces: Tri/Quad or Quad; one selected vertex: curve stroke; Ctrl+drag near a selected edge or edge chain: quad strip. Keep Ctrl held to continue. **Alt+Wheel** relaxes the selection (wheel down steps back, release Alt to confirm); its method (Brush Relax, Grid Relax, LoopTools Relax, Native) is in Build's settings and the tool header's **Alt+Wheel Smooth** menu. |
 | **Fill** | Select one closed outline (or several closed panels) or hover a hole, hold Ctrl to preview, Ctrl+Wheel to step through the choices found, Ctrl+click to fill. **Alt+Wheel** relaxes the selection, as in Build. |
 | **Tweak** | Drag to push the vertices under the brush. |
 | **Relax** | Hold LMB to relax triangles and quads with **Robust Relax**: it fixes skewed quads while keeping each quad's size and proportions; its **Even Out Spacing** (on by default) evens out spacing along each row of quads while keeping row widths. Boundary: Move (default), Slide or Lock. N-gon vertices are protected. Hold **Alt+LMB** for **Grid Relax**: edges even out, each vertex moves toward the center of its neighbors and faces become regular, in small steps along the surface (same brush and mask settings). Hold **Ctrl** and drag for a temporary Tweak. |
@@ -144,7 +141,7 @@ tool (Select, Move, ...) is active switches to Build, since retopology happens i
 PolyTailor; choosing it inside a PolyTailor tool keeps that tool. 3D chosen in a
 Blender tool is remembered for the next PolyTailor tool. Leaving PolyTailor (a Blender
 tool, or out of Edit Mode) returns to 3D and to your own snapping settings; switching
-between PolyTailor tools keeps the mode. Saved files keep your own snapping settings.
+between PolyTailor tools keeps the mode.
 
 Snap targets follow the mode: 3D includes the active, edited and non-edited objects;
 Topo only non-edited objects (the source), so points never snap to the mesh being built.
@@ -228,8 +225,8 @@ shared edge must be merged first. The preview shows the number of panels, of sha
 - Brush masks: selection, boundary (move / slide / lock), corners, seams, sharps,
   creases, and vertices occluded behind the surface (**Affect Hidden Vertices**, off
   by default).
-- Mirror modifiers with clipping are respected by every move; **Add Mirror**
-  (Sidebar > Display & Mirror) adds one with Clipping and Merge on.
+- Every move keeps vertices on the mirror plane of a Mirror modifier with Clipping on;
+  **Add Mirror** (Sidebar > Display & Mirror) adds one with Clipping and Merge on.
 
 ## Licensing
 
@@ -238,3 +235,7 @@ are in `licenses/` (see `licenses/README.md` for the full list).
 
 Credits: Alt+Wheel LoopTools Relax uses functions from Blender's LoopTools
 (GPL; notice in `licenses/`).
+
+## Acknowledgements
+
+PolyTailor's workflow was inspired by RetopoFlow.

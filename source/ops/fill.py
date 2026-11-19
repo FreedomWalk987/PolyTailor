@@ -7,7 +7,7 @@ import math
 import bmesh
 import bpy
 import time
-from ..i18n import tr as iface_   # add-on context first
+from ..i18n import tr as iface_, tr_rpt   # add-on context first
 
 from .. import props, palette, prefs
 from ..core import draw, fill, raycast
@@ -16,20 +16,21 @@ from .common import timer_tick
 
 SLICE_SECONDS = .008     # leave room for the final cooperative step and UI guard
 BETTER_SECONDS = 2.5   # how long "Better result found" stays in the HUD
-# refusals no fill engine can change (the New fallback is skipped for them)
+# refusals no fill engine can change (the fallback search is skipped for them)
 _DEFINITE_REFUSALS = ("Invalid boundary", "This outline encloses no area", "Loop too short", "Loop too long")
 PROGRESSIVE_SECONDS = 1.5   # searching longer: candidates appear as they are confirmed
-SEARCH_CAP_SECONDS = 10.0   # a Legacy search ends with its best so far after this long
-FALLBACK_PRE_SECONDS = 2.0   # no Legacy candidate yet: precompute the fallback after this
-FALLBACK_PRE_SLICE = .006   # seconds of fallback precompute per idle tick (Legacy keeps its own slices)
-# step 4 once Legacy is idle with a candidate: the New run is stepped for this long per modal tick, plus at most one
+SEARCH_CAP_SECONDS = 10.0   # a main search ends with its best so far after this long
+FALLBACK_PRE_SECONDS = 2.0   # no main-search candidate yet: precompute the fallback after this
+SURFACE_SECONDS = 3.0   # the main search on the outline laid out on the source finds a first candidate within this
+FALLBACK_PRE_SLICE = .006   # seconds of fallback precompute per idle tick (the main search keeps its own slices)
+# step 4 (main search idle with a candidate): the second search runs this long per modal tick, plus at most one
 # step (a step started before the bound runs to its end). 20 ms keeps the viewport near 50 fps (a tick = this budget
 # + at most one step + Blender's own event / redraw work), well under
 # the ~100 ms where a preview stops feeling live, while giving the run most of each tick (one 6 ms slice per tick
 # left it running 5-20 s longer than its own compute time in the real UI).
 STEP4_IDLE_SECONDS = .020
 PROVISIONAL_SECONDS = 1.0   # settle-first shows a provisional #1 after this long
-FIRST_RESULT_SECONDS = 1.0   # New engine: A's result is shown at 1 s while S still runs
+FIRST_RESULT_SECONDS = 1.0   # fallback search: A's result is shown at 1 s while S still runs
 FAST_MIN_Q = .35       # Fast mode Q: a pick below this minQ makes the search fall back to Full
 TIMER_SECONDS = .001     # work resumes promptly; redraw has its own cadence
 REDRAW_SECONDS = 1 / 30  # HUD and spinner redraw cadence while busy
@@ -69,7 +70,7 @@ def _face_count(plan):
     return iface_("{faces} faces").format(faces=n)   # own msgid
 
 
-QUALITY_FLOOR = .20   # the hidden Fill quality-floor preference was always read as .20
+QUALITY_FLOOR = .20   # Fill's quality floor
 
 
 def _debug(context):
@@ -134,7 +135,7 @@ class PPO_OT_fill(bpy.types.Operator):
     bl_idname = "ppo.fill"
     bl_label = "Fill"
     bl_translation_context = "Poly Toolset"
-    bl_description = "Hold Ctrl: preview a closed loop, Ctrl+Wheel: change choice, Ctrl+click: fill"
+    bl_description = "Hold Ctrl: preview the selected outline or hovered hole, Ctrl+Wheel: change choice, Ctrl+click: fill"
     bl_options = {"INTERNAL"}
 
     @classmethod
@@ -148,8 +149,8 @@ class PPO_OT_fill(bpy.types.Operator):
         self.triangle_selected = False
         self.wheel_touched = False
         self.legacy_searching = False
-        self.newfill_active = False          # this preview runs the New engine
-        self.newfill_entries = []            # New wheel entries (plans), the pick first
+        self.newfill_active = False          # this preview runs the fallback search
+        self.newfill_entries = []            # fallback-search wheel entries (plans), the pick first
         self.newfill_index = 0
         self.newfill_result = None
         from ..core.fill_layouts import Portfolio
@@ -163,7 +164,7 @@ class PPO_OT_fill(bpy.types.Operator):
         self.state = FillState(context)
         import numpy as np
         if not np.isfinite(self.state.view.arrays()[4]).all():   # a NaN / Inf vertex: refuse at once
-            self.report({"WARNING"}, iface_(fill.PLAIN_FAILURE))
+            self.report({"WARNING"}, tr_rpt(fill.PLAIN_FAILURE))
             return {"CANCELLED"}
         self.region = context.region.as_pointer()
         self.mouse = raycast.mouse(event)
@@ -189,7 +190,7 @@ class PPO_OT_fill(bpy.types.Operator):
                 except Exception as end_exc:
                     _log_engine_error('first slice cleanup', end_exc)
                     self._release_ui(context)
-                self.report({"WARNING"}, iface_(fill.PLAIN_FAILURE))
+                self.report({"WARNING"}, tr_rpt(fill.PLAIN_FAILURE))
                 return {"CANCELLED"}
         _tag_redraw(context)
         context.window_manager.modal_handler_add(self)   # after the first engine slice (an error there leaves none)
@@ -198,7 +199,7 @@ class PPO_OT_fill(bpy.types.Operator):
     # ---------------------------------------------------------------- planning
 
     def _legacy_pref(self, context, name, default):
-        """Search as the Legacy engine sees it; pinned to FAST on the New pipeline's S lane (its throwaway
+        """The Search setting as the main search sees it; pinned to FAST in the second search's S part (its throwaway
         instance sets newfill_more). Ranking is always FLOW (Portfolio.ranked_keys: the default first, then the R1
         band, then by S)."""
         if getattr(self, 'newfill_more', False):
@@ -225,7 +226,7 @@ class PPO_OT_fill(bpy.types.Operator):
     def _cancel_job(self):
         token, self._job_cancel = getattr(self, '_job_cancel', None), None
         if token is not None:
-            token.set()   # the New run's lane jobs stop at their next deadline check
+            token.set()   # the second search's background jobs stop at their next deadline check
         triangle_job, self.triangle_job = getattr(self, 'triangle_job', None), None
         if triangle_job is not None:
             triangle_job.close()
@@ -237,6 +238,9 @@ class PPO_OT_fill(bpy.types.Operator):
         job, self.job = self.job, None
         if job is not None:
             job.close()
+        run, self._crease_run = getattr(self, '_crease_run', None), None
+        if run is not None:
+            run['gen'].close()
 
     def _cuts_steps(self, context, world, settings):
         """P1 and classification candidates before canonical refinement."""
@@ -289,7 +293,7 @@ class PPO_OT_fill(bpy.types.Operator):
             self.fail_marks = marks
             raise fill.FillError("Invalid boundary")
         if (automatic and len(world) % 2 == 0
-                and not getattr(self, 'newfill_more', False)):   # the instant direct grid (not in the New engine's S lane)
+                and not getattr(self, 'newfill_more', False)):   # the instant direct grid (not in the S part)
             f1_started = time.perf_counter()
             direct = yield from fill_progressive.deterministic_steps(fill.direct_steps(world, settings), .00005)
             if direct is not None and not props.settings(context).pen3d and self.state.view.srcs:
@@ -311,7 +315,7 @@ class PPO_OT_fill(bpy.types.Operator):
             # Give common network fills a short head start. Pause only between
             # cooperative steps, with every search deadline already restored.
             if automatic:
-                while head_stats.get('work_ticks', 0) * .00005 < .02:   # 0.02 work-seconds (was real time)
+                while head_stats.get('work_ticks', 0) * .00005 < .02:   # 0.02 work-seconds
                     try:
                         next(legacy_job)
                     except StopIteration as done:
@@ -365,6 +369,120 @@ class PPO_OT_fill(bpy.types.Operator):
                 return seed
         return plan
 
+    def _crease_running(self):
+        """the crease-fill search for this outline is still working."""
+        run = getattr(self, '_crease_run', None)
+        return run is not None and not run['done']
+
+    def _crease_tail(self, context):
+        """After the main search ends (with or without a candidate; not after a certain refusal), Topo mode on an even
+        outline: the crease-fill search (fill_crease.tail_steps: detection, a quick crease fill, the wider search) runs
+        in idle slices before the second search, so it never slows or changes the main search. Its fills join the
+        candidates. True when it used this tick."""
+        if (self.loop is None or self._busy() or self.state.panels or getattr(self, 'newfill_active', False)
+                or self._fallback_here() or getattr(self, 'fail_marks', None) is not None
+                or str(getattr(self, 'error', '') or '').startswith(_DEFINITE_REFUSALS)):
+            return False
+        pre = getattr(self, '_fb_pre', None)
+        if pre is not None and pre['ids'] != tuple(v.index for v in self.loop):
+            return False   # a second-search run of another outline is dropped first (_fallback_precompute)
+        run = getattr(self, '_crease_run', None)
+        if run is None:
+            if getattr(self, '_crease_ids', None) == ('run', self.key):   # once per outline and options
+                return False
+            self._crease_ids = ('run', self.key)
+            from ..core import fill_crease, fill_progressive
+            if len(self.loop) % 2 or props.settings(context).pen3d or not self.state.view.srcs:
+                return False
+            settings = self._settings(context)
+            if not fill_progressive.eligible(settings):
+                return False
+            world = fill.world_points(self.state.mw, self.loop)
+            run = self._crease_run = dict(gen=fill_crease.tail_steps(world, self.state.view.srcs, settings,
+                                                                     self.portfolio.crease_rank,
+                                                                     base=self.plan is not None),
+                                          done=False, srcs=self.state.view.srcs)
+        if run['done']:
+            return False
+        deadline = time.perf_counter() + STEP4_IDLE_SECONDS
+        try:
+            while time.perf_counter() < deadline:
+                if run['srcs'] is not self.state.view.srcs:   # the sources were read again: drop this run
+                    self._crease_drop()
+                    return True
+                update = next(run['gen'])
+                if isinstance(update, dict) and 'crease' in update:
+                    self._crease = update['crease']
+                elif isinstance(update, dict) and 'candidate' in update:
+                    self._crease_join(update['candidate'])
+                    break
+        except StopIteration as done:
+            run['done'] = True
+            if done.value is not None and run['srcs'] is self.state.view.srcs:
+                self._crease_join(done.value)
+        except Exception as exc:   # noqa: BLE001  (Fill continues without the crease fill)
+            run['done'] = True
+            _log_engine_error('crease search', exc)
+        return True
+
+    def _crease_drop(self):
+        """a crease run whose sources were read again: closed, and its fills taken out of the candidates (the shown
+        fill follows the default when it was one of them)."""
+        run = getattr(self, '_crease_run', None)
+        if run is not None:
+            run['gen'].close()
+            run['done'] = True
+        self._crease = None
+        pf = self.portfolio
+        from ..core import fill_layouts
+        keys = [k for k in pf.entries if fill_layouts._is_crease(k)]
+        for k in keys:
+            pf.entries.pop(k, None)
+            pf.placements.pop(k, None)
+            pf.plain_seen.pop(k, None)
+            if pf.selected == k:
+                pf.selected, pf.locked = None, False
+            if getattr(pf, 'default', None) == k:
+                pf.default = None
+        if keys and (self.plan is None or self.plan.get('_crease_candidate')):
+            self.plan = pf.plan
+            self._shown_plan = self.plan
+
+    def _crease_join(self, plan):
+        """a crease fill joins the portfolio (it replaces a weaker crease fill). As for the second search's fill: a new
+        #1 is shown when the user is on entry 1, the user's own fill stays shown and selected otherwise, and "Better
+        result found" either way."""
+        pf = self.portfolio
+        before = pf._plan_of(getattr(pf, 'default', None))
+        kept = self.plan
+        if not pf.add(plan):
+            return
+        best = pf._plan_of(getattr(pf, 'default', None)) if pf.plan is not None else None
+        listed = kept is not None and (kept is pf.legacy or any(p is kept for k, (s, p) in pf.entries.items()))
+        if kept is not None and not listed:   # the user's fill was the weaker crease fill it replaced
+            if not pf.locked:
+                pf.selected = None
+            self.plan, self.error = pf.plan, ''
+            self._shown_plan = self.plan
+            if best is not before:
+                self._note_better()
+            return
+        if best is None or best is before:
+            return
+        parked = getattr(self, 'wheel_touched', False) and not self.__dict__.get('_wheel_first', False)
+        on_first = kept is before and not (pf.locked and parked)
+        if on_first:
+            pf.selected, pf.locked = None, False
+            self.plan, self.error = pf.plan, ''
+        elif not pf.locked:   # the user's fill stays shown AND selected
+            from ..core import fill_layouts
+            key = (fill_layouts.LEGACY_KEY if kept is pf.legacy
+                   else next((k for k, (s, p) in pf.entries.items() if p is kept), None))
+            if key is not None:
+                pf.selected, pf.locked = key, True
+        self._shown_plan = self.plan
+        self._note_better()
+
     def _refine_steps(self, context, world, settings):
         return (yield from PPO_OT_fill._refine_body(self, context, world, settings))
 
@@ -414,7 +532,7 @@ class PPO_OT_fill(bpy.types.Operator):
                     and self.fast_min_q >= FAST_MIN_Q):
                 yield {'settled': True}
                 return None   # Fast: no canonical or field
-            # Full, reusing initial / A / P1 / legacy (same incumbent as Full)
+            # Full, reusing initial / A / P1 / main search (same incumbent as Full)
             self.legacy_searching = False   # the HUD shows the search continuing
             if seed is not None:   # continue exactly as Full's refine_steps after its seed step
                 plan = yield from PPO_OT_fill._canonical_steps(self, context, world, dict(settings, _network_seeded=True),
@@ -456,7 +574,7 @@ class PPO_OT_fill(bpy.types.Operator):
         return plan
 
     def _refine_tail(self, context, world, settings):
-        """plan + P1 + canonical + legacy are done; #1 is settled here; then the supplementary families."""
+        """plan + P1 + canonical + main search are done; #1 is settled here; then the supplementary families."""
         yield {'settled': True}
         from ..core import fill_field
         self.field_searching = True
@@ -490,6 +608,7 @@ class PPO_OT_fill(bpy.types.Operator):
         if plan is None:
             return
         direct = bool(plan.get('_direct'))
+        aside = direct or bool(plan.get('_crease_candidate'))   # never steers the main search
         shadow = getattr(self, 'portfolio_nd', None)   # the portfolio without the direct grid (search decisions)
         if plan.get('_legacy_layout'):
             self.portfolio.add_legacy(plan, select_if_empty=getattr(self, '_legacy_view', self.plan) is None)
@@ -497,9 +616,9 @@ class PPO_OT_fill(bpy.types.Operator):
                 shadow.add_legacy(plan, select_if_empty=getattr(self, '_legacy_view', self.plan) is None)
         else:
             self.portfolio.add(plan)
-            if shadow is not None and not direct:
+            if shadow is not None and not aside:
                 shadow.add(plan)
-        if shadow is not None and not direct and shadow.plan is not None:
+        if shadow is not None and not aside and shadow.plan is not None:
             self._legacy_view = shadow.plan   # what self.plan would be without the direct grid
         if self.portfolio.plan is not None:
             self.plan, self.error = self.portfolio.plan, ''
@@ -522,8 +641,8 @@ class PPO_OT_fill(bpy.types.Operator):
                 and self.loop is not None and (self.job is not None or self.background is not None))
 
     def _unseen(self):
-        """A Legacy plan exists but the viewport does not draw it yet (_paint draws only in the 'done' and
-        'progressive' stages): no wheel, no commit. The New fallback keeps its own first-result rules."""
+        """A main-search plan exists but the viewport does not draw it yet (_paint draws only in the 'done' and
+        'progressive' stages): no wheel, no commit. The fallback search keeps its own first-result rules."""
         return (self.plan is not None and self.loop is not None and not getattr(self, 'newfill_active', False)
                 and self._display_stage() not in ('done', 'progressive'))
 
@@ -669,7 +788,7 @@ class PPO_OT_fill(bpy.types.Operator):
                 and (self.job is not None or self.background is not None or self.triangle_job is not None))
 
     def _legacy_cap(self, context):
-        """a Legacy search still running SEARCH_CAP_SECONDS after it started ends with its best so far."""
+        """a main search still running SEARCH_CAP_SECONDS after it started ends with its best so far."""
         if not self._legacy_busy() or getattr(self, 'newfill_active', False):
             return
         if time.perf_counter() - getattr(self, 'replan_started', time.perf_counter()) < SEARCH_CAP_SECONDS:
@@ -679,20 +798,21 @@ class PPO_OT_fill(bpy.types.Operator):
         self.plan = best
         if best is None and self.state.panels and not self.error:   # a panel network has no fallback
             self.error = "Panel search took too long; select fewer panels"
-            self.report({"WARNING"}, iface_(fill.user_text(self.error, _debug(None))))   # also on the cursor line
+            self.report({"WARNING"}, tr_rpt(fill.user_text(self.error, _debug(None))))   # also on the cursor line
         _tag_redraw(context)
 
     def _fallback_precompute(self, context):
-        """with no Legacy candidate after FALLBACK_PRE_SECONDS, step the New pipeline in idle
-        slices (never shown). Step 4: also started when Legacy ends with a candidate; not dropped when Legacy finds
-        one, but never stepped while Legacy searches with a candidate (Legacy keeps its main-thread share); dropped
-        when the outline or the options its mesh depends on (3D mode, projection sources) change.
+        """with no main-search candidate after FALLBACK_PRE_SECONDS, step the second search in idle
+        slices (never shown). Step 4: also started when the main search ends with a candidate; not dropped when
+        the main search finds one, but never stepped while the main search runs with a candidate (it keeps its
+        share of Blender's time); dropped when the outline or the options its mesh depends on (3D mode, projection
+        sources) change.
         a result a budget cut short is not cached (hidden=True); it is still the fallback shown for this
-        outline. its S lane runs on an active-time clock (only the time spent in its own steps
+        outline. its S part runs on an active-time clock (only the time spent in its own steps
         counts, not the gaps between idle slices); the takeover switches it to real time."""
         pre = getattr(self, '_fb_pre', None)
         ids = tuple(v.index for v in self.loop) if self.loop is not None else None
-        if pre is not None and (ids != pre['ids'] or self._fallback_here()):   # step 4: kept when Legacy has a candidate
+        if pre is not None and (ids != pre['ids'] or self._fallback_here()):   # step 4: kept when a candidate exists
             if not self._fallback_here():
                 self._drop_fallback_pre()
             return
@@ -701,16 +821,18 @@ class PPO_OT_fill(bpy.types.Operator):
             pre = None
         if (pre is None and not self.state.panels and not getattr(self, 'newfill_active', False)
                 and getattr(self, '_step4_blocked', None) is not self.portfolio   # dropped as stale: next re-plan
+                and not getattr(self, '_surface_pending', False)   # the outline's layout is still being made
                 and ((self._legacy_busy() and self.plan is None
                       and time.perf_counter() - getattr(self, 'replan_started', time.perf_counter()) >= FALLBACK_PRE_SECONDS)
                      or (self.loop is not None and self.plan is not None and not self._busy()
-                         and not self._fallback_here()))):   # step 4: Legacy ended with a candidate
-            world = fill.world_points(self.state.mw, self.loop)
+                         and not self._fallback_here()))):   # step 4: the main search ended with a candidate
+            world = self._plan_world()
             from ..core.newfill import pipeline
             token = pipeline.cancel_token()   # this run's own token
             clock = dict(active=True, paused=0.)
             pre = self._fb_pre = dict(ids=ids, geo=self._loop_geo(), cancel=token, clock=clock,
                                       pen3d=bool(props.settings(context).pen3d), srcs=self.state.view.srcs,
+                                      surface=getattr(self, '_surface', None),
                                       portfolio=self.portfolio, step4=self.plan is not None,
                                       gen=self._newfill_steps(context, world, self._settings(context), cancel=token,
                                                               hidden=True, clock=clock),
@@ -720,8 +842,8 @@ class PPO_OT_fill(bpy.types.Operator):
         if pre is None or pre['done']:
             return
         if self._legacy_busy() and self.plan is not None:
-            return   # step 4: paused while Legacy searches with a candidate (resumed when it ends)
-        idle = self.plan is not None   # step 4 after Legacy's end (a busy Legacy with a candidate returned above)
+            return   # step 4: paused while the main search runs with a candidate (resumed when it ends)
+        idle = self.plan is not None   # step 4 after the main search's end (a busy one with a candidate returned above)
         deadline = time.perf_counter() + (STEP4_IDLE_SECONDS if idle else FALLBACK_PRE_SLICE)
         visible = self._swap_hidden_state(pre['state'])   # the hidden run never touches the shown one
         try:
@@ -742,16 +864,19 @@ class PPO_OT_fill(bpy.types.Operator):
     _HIDDEN_ATTRS = ('newfill_result', 'newfill_entries', 'newfill_index', 'better_until', 'fr_shown', '_fr_prov')
 
     def _step4_matches(self, pre, context):
-        """the hidden New run's mesh still fits: the same 3D mode setting and, with 3D mode off, the same projection
-        sources (the view's list, by identity: a refresh swaps in a new list). With 3D mode on they are not used."""
+        """the hidden second-search run's mesh still fits: the same 3D mode setting and, with 3D mode off, the same
+        projection sources (the view's list, by identity: a refresh swaps in a new list) and the same layout on the
+        source surface (_start_job). With 3D mode on they are not used."""
         pen3d = bool(props.settings(context).pen3d)
-        return pre.get('pen3d') == pen3d and (pen3d or pre.get('srcs') is self.state.view.srcs)
+        return (pre.get('pen3d') == pen3d and (pen3d or pre.get('srcs') is self.state.view.srcs)
+                and pre.get('surface') is getattr(self, '_surface', None))
 
     def _step4_drop_stale(self):
         """a step-4 run whose mesh no longer fits (options or outline geometry changed): dropped; when it had joined
         the current portfolio its entry is taken out and the shown fill restored; no new run for this portfolio when
-        the dropped run had joined it or was started for it as a step-4 run (Legacy already had a candidate); the next
-        re-plan starts one. A fallback precompute (started with no Legacy candidate) restarts as before."""
+        the dropped run had joined it or was started for it as a step-4 run (the main search already had a
+        candidate); the next re-plan starts one. A fallback precompute (started with no main-search candidate)
+        restarts as before."""
         pre = getattr(self, '_fb_pre', None)
         pf = getattr(self, 'portfolio', None)
         joined = pre is not None and pf is not None and pre.get('joined') is pf
@@ -762,8 +887,9 @@ class PPO_OT_fill(bpy.types.Operator):
             self._step4_unjoin()
 
     def _step4_unjoin(self):
-        """take New's entry out of the current portfolio again; the shown fill and pf.plan without it (the user's
-        fill stays shown unless it was New's; a "Better result found" note for the removed fill is cleared)."""
+        """take the second search's entry out of the current portfolio again; the shown fill and pf.plan without
+        it (the user's fill stays shown unless it was the second search's; a "Better result found" note for the
+        removed fill is cleared)."""
         pf = self.portfolio
         shown = self.plan
         try:
@@ -772,7 +898,7 @@ class PPO_OT_fill(bpy.types.Operator):
             first = None
         self._step4_remove(pf)
         try:
-            best = pf.plan   # the default without New's fill (an unlocked portfolio selects it)
+            best = pf.plan   # the default without the second search's fill (an unlocked portfolio selects it)
             odd = getattr(self, 'odd_wheel', None)
             new_shown = shown is not None and bool(shown.get('_step4_candidate'))
             if odd:
@@ -792,16 +918,18 @@ class PPO_OT_fill(bpy.types.Operator):
 
     @staticmethod
     def _step4_candidate(plan):
-        """step 4: New's pick as a regular Legacy candidate: the same mesh, without the New-wheel marker (the Legacy
-        wheel and HUD show it), marked _step4_candidate (the portfolio's final-pick guard)."""
+        """step 4: the second search's pick as a regular main-search candidate: the same mesh, without the
+        fallback-wheel marker (the main search's wheel and HUD show it), marked _step4_candidate (the portfolio's
+        final-pick guard)."""
         out = {k: v for k, v in plan.items() if k != '_newfill_lane'}
         out['_step4_candidate'] = plan.get('_newfill_lane') or True
         return out
 
     @staticmethod
     def _step4_remove(pf):
-        """take the step-4 entries out again (a join that raised, a stale run): Legacy's candidates as before the
-        join. By the ('step4',) key suffix in entries, placements and plain_seen, and any entry marked as New's."""
+        """take the step-4 entries out again (a join that raised, a stale run): the main search's candidates as
+        before the join. By the ('step4',) key suffix in entries, placements and plain_seen, and any entry marked as
+        the second search's."""
         try:
             keys = {k for d in (pf.entries, pf.placements, pf.plain_seen) for k in d
                     if isinstance(k, tuple) and k and k[-1] == 'step4'}
@@ -819,19 +947,21 @@ class PPO_OT_fill(bpy.types.Operator):
             _log_engine_error('step 4 cleanup', exc)
 
     def _step4_running(self):
-        """the hidden New run for this outline is still working (the timer stays fast)."""
+        """the hidden second-search run for this outline is still working (the timer stays fast)."""
         pre = getattr(self, '_fb_pre', None)
         return pre is not None and not pre['done'] and not self._fallback_here()
 
     def _step4_tail(self):
-        """step 4 after Legacy is done: its New run still works (the HUD says "Improving fill preview...")."""
+        """step 4, the main search done: the second search still works (the HUD says "Improving fill preview...")."""
         return (self.loop is not None and self.plan is not None and not self._busy() and not self.state.panels
-                and not getattr(self, 'newfill_active', False) and self._step4_running())
+                and not getattr(self, 'newfill_active', False)
+                and (self._step4_running() or PPO_OT_fill._crease_running(self)))
 
     def _step4_join(self, context):
-        """step 4: when the hidden New run is done and Legacy ended with a candidate, New's pick joins the portfolio
-        (once per portfolio). A finished run whose outline geometry or options changed is dropped first
-        (_step4_drop_stale: its entry taken out of this portfolio; the next re-plan runs New again). A new #1 is shown
+        """step 4: when the hidden second-search run is done and the main search ended with a candidate, the
+        second search's pick joins the portfolio (once per portfolio). A finished run whose outline geometry or
+        options changed is dropped first (_step4_drop_stale: its entry taken out of this portfolio; the next
+        re-plan runs the second search again). A new #1 is shown
         when the user is on entry 1; "Better result found" either way."""
         pre = getattr(self, '_fb_pre', None)
         if (pre is None or not pre['done'] or self.loop is None or getattr(self, 'newfill_active', False)
@@ -856,12 +986,12 @@ class PPO_OT_fill(bpy.types.Operator):
                 return
             pf.plan   # refreshes the default: rule (a) and the step-4 guard
             best = pf._plan_of(getattr(pf, 'default', None))
-        except Exception as exc:   # never reaches the modal handler: Legacy's candidates as before
+        except Exception as exc:   # never reaches the modal handler: the main search's candidates as before
             _log_engine_error('step 4', exc)
             self._step4_remove(pf)
             return
         if best is None or best is before:
-            return   # New's fill is a wheel entry; #1 is unchanged
+            return   # the second search's fill is a wheel entry; #1 is unchanged
         odd = getattr(self, 'odd_wheel', None)
         # a fill the user wheeled to (and did not wheel back to entry 1 from) is never replaced by a later New #1
         parked = getattr(self, 'wheel_touched', False) and not self.__dict__.get('_wheel_first', False)
@@ -896,7 +1026,7 @@ class PPO_OT_fill(bpy.types.Operator):
         return old
 
     def _drop_fallback_pre(self):
-        """drop the hidden fallback precompute; cancel its run's lane jobs."""
+        """drop the hidden fallback precompute; cancel its run's background jobs."""
         pre, self._fb_pre = getattr(self, '_fb_pre', None), None
         if pre is None:
             return
@@ -941,7 +1071,7 @@ class PPO_OT_fill(bpy.types.Operator):
         if self.state.panels:
             return
         settings = self._settings(context)   # always AUTO; no layout / anchors / rotation / shift
-        self.background = self._refine_steps(context, fill.world_points(self.state.mw, self.loop), settings)
+        self.background = self._refine_steps(context, self._plan_world(), settings)
 
     def _replan(self, context):
         if self.loop is None:
@@ -979,31 +1109,80 @@ class PPO_OT_fill(bpy.types.Operator):
         self.portfolio_nd = Portfolio(ranking='FLOW', quality_floor=QUALITY_FLOOR)   # the same, without the direct grid
         self.portfolio_nd.rank_r1 = True
         self._legacy_view = None
+        self._crease = self._crease_ids = None   # the source crease of this outline (the crease-fill search runs again)
         self.plan, self.error = None, ""
         self.fail_marks = None   # certain_fail markers of this outline
         world = fill.world_points(self.state.mw, self.loop)
         self.newfill_entries, self.newfill_index, self.newfill_result = [], 0, None
         self._fr_prov, self.fr_shown, self.fr_touched = None, False, False   # first-result deadline
         self.newfill_active = (self._fallback_here()
-                               and not self.state.panels)   # New runs only as the silent fallback
+                               and not self.state.panels)   # the second search runs only as the silent fallback
         if self.newfill_active:
             self.settle_pending = self.settle_on = False
             from ..core.newfill import pipeline
             self._job_cancel = pipeline.cancel_token()   # set by _cancel_job
-            self.job = self._newfill_steps(context, world, settings, cancel=self._job_cancel)
+            self._start_job(context, world, lambda w: self._newfill_steps(context, w, settings, cancel=self._job_cancel))
         else:
-            self.job = self._plan_steps(context, world, settings)
+            self._start_job(context, world, lambda w: self._plan_steps(context, w, settings))
         self.replan_started = time.perf_counter()
         self._went_progressive, self._shown_plan = False, None   # display timing: per search
         self.reveal_seconds = 0.0 if _debug(context) else PROVISIONAL_SECONDS   # debug shows #1 at once
         _tag_redraw(context)
+
+    def _start_job(self, context, world, make):
+        """the search job of this outline: make(outline). Topo mode, one even outline: the outline at its flat
+        positions on the source surface when there is a patch under it (core/fill_surface; fill.project_steps maps
+        each candidate back onto the source), else the outline itself as before."""
+        self._surface, self._surface_pending = None, False
+        if props.settings(context).pen3d or not self.state.view.srcs or self.state.panels or len(world) % 2:
+            self.job = make(world)
+            return
+        from ..core import fill_surface
+        known, surface = fill_surface.known(world, self.state.view.srcs)
+        if known:
+            self._surface = surface
+            self.job = make(world if surface is None or surface.plain else surface.flat)
+        else:
+            self._surface_pending = True
+            self.job = self._surface_steps(world, make)
+
+    def _surface_steps(self, world, make):
+        """the patch under the outline is flattened cooperatively, then the search runs."""
+        from ..core import fill_surface
+        surface = yield from fill_surface.prepare_steps(world, self.state.view.srcs)
+        self._surface, self._surface_pending = surface, False
+        return (yield from make(world if surface is None or surface.plain else surface.flat))
+
+    def _plan_world(self):
+        """the outline as this outline's planners see it (see _start_job)."""
+        world = fill.world_points(self.state.mw, self.loop)
+        surface = getattr(self, '_surface', None)
+        return world if surface is None or surface.plain else surface.flat
+
+    def _surface_fallback(self, context):
+        """the main search on the flat outline ended with no fill (every candidate refused), or has none after
+        SURFACE_SECONDS: the outline is planned again as before (on its plane, then moved onto the source) with its
+        own time cap, as today. A second-search run already planned on the flat outline stays valid (its candidates
+        are mapped)."""
+        surface = getattr(self, '_surface', None)
+        if (surface is None or surface.plain or self.loop is None or getattr(self, 'newfill_active', False)
+                or self.plan is not None or self.triangle_job is not None):
+            return
+        if self.job is not None or self.background is not None:
+            if time.perf_counter() - getattr(self, 'replan_started', time.perf_counter()) < SURFACE_SECONDS:
+                return
+            self._cancel_job()   # no candidate on the source in time: the plane search below
+        surface.plain = True
+        self.key = None
+        self._replan(context)
 
     def _total_entries(self):
         """the number of New (fallback) entries."""
         return len(self.newfill_entries)
 
     def _fallback_here(self):
-        """New runs as the silent fallback for this outline (Legacy ended with no candidate for it)."""
+        """the second search runs as the silent fallback for this outline (the main search ended with no
+        candidate for it)."""
         loop = getattr(self, 'loop', None)
         return loop is not None and getattr(self, '_fallback_ids', None) == tuple(v.index for v in loop)
 
@@ -1028,12 +1207,12 @@ class PPO_OT_fill(bpy.types.Operator):
         return kept
 
     def _newfill_steps(self, context, world, settings, cancel=None, hidden=False, clock=None):
-        """New engine: one pipeline generator; A/E/dopt as worker jobs, the Legacy S lane stepped here.
+        """the second search: one pipeline generator; A/E/dopt as worker jobs, S (the main search) stepped here.
         cancel: the run's token (pipeline.cancel_token). hidden: the fallback precompute. clock: its
-        S-lane active-time clock."""
+        S-part active-time clock."""
         from ..core import fill_layouts, fill_triangle
         from ..core.newfill import pipeline
-        from . import fill as fill_op   # this module (the S lane steps PPO_OT_fill's planner methods)
+        from . import fill as fill_op   # this module (the S part steps PPO_OT_fill's planner methods)
         s_ctx = dict(fill=fill, layouts=fill_layouts, op=fill_op, triangle=fill_triangle, context=context)
         if clock is not None:
             s_ctx['clock'] = clock
@@ -1069,7 +1248,7 @@ class PPO_OT_fill(bpy.types.Operator):
         if (hit_ is None and result is not None and result.get('cands')
                 and not result.get('log', {}).get('cancelled')   # never a cancelled run
                 and not result.get('log', {}).get('degraded')   # E / dopt / flow cut by a budget
-                and not result.get('log', {}).get('exc')   # a lane ended with an error (e.g. a lost process)
+                and not result.get('log', {}).get('exc')   # a search part ended with an error (e.g. a lost process)
                 and not (hidden and _budget_bound(result.get('log', {})))):
             log_ = {k: v for k, v in result.get('log', {}).items() if k != 's_plans'}
             _RIM_CACHE[key_] = copy.deepcopy(dict(result, log=log_))
@@ -1139,16 +1318,20 @@ class PPO_OT_fill(bpy.types.Operator):
     def _advance(self, context):
         previous, was_busy = self.plan, self._busy()
         self._advance_work(context)
+        self._surface_fallback(context)   # no fill on the flat outline: planned again on the plane
         self._legacy_cap(context)   # 10 s total search cap
-        self._fallback_precompute(context)
-        self._step4_join(context)   # step 4: New's pick joins the Legacy candidates
+        if not self._crease_tail(context):   # the wider crease-fill search first, then the second search
+            self._fallback_precompute(context)
+        self._step4_join(context)   # step 4: the second search's pick joins the main-search candidates
         self._hold_shown()   # display timing
         if (self.loop is not None and self.plan is None and self.job is None and self.background is None
                 and self.triangle_job is None and not getattr(self, 'newfill_active', False) and not self.state.panels
                 and getattr(self, '_fallback_ids', None) != tuple(v.index for v in self.loop)
                 and not str(getattr(self, 'error', '') or '').startswith(_DEFINITE_REFUSALS)
-                and getattr(self, '_refused_ids', None) != tuple(v.index for v in self.loop)):
-            # Legacy ended with no candidate for this outline: New runs once as the silent fallback
+                and getattr(self, '_refused_ids', None) != tuple(v.index for v in self.loop)
+                and not self._crease_running()):   # a crease fill may still come
+            # the main search ended with no candidate for this outline: the second search runs once as the silent
+            # fallback
             self._fallback_ids = tuple(v.index for v in self.loop)
             pre, self._fb_pre = getattr(self, '_fb_pre', None), None
             handed = pre is None   # pre is owned again (shown job / _drop_fallback_pre) once this is True
@@ -1166,14 +1349,14 @@ class PPO_OT_fill(bpy.types.Operator):
                     self._job_cancel = pre.get('cancel')   # the taken-over run is cancelled through it
                     handed = True
                     if pre.get('clock') is not None:
-                        pre['clock']['active'] = False   # shown now: its S lane runs on real time
+                        pre['clock']['active'] = False   # shown now: its S part runs on real time
                     self._swap_hidden_state(pre['state'])   # its entries become the shown ones
                 elif pre is not None:
                     self._fb_pre = pre
                     handed = True
                     self._drop_fallback_pre()
             except BaseException:
-                if not handed:   # detached above and owned by nobody: stop its lane jobs now
+                if not handed:   # detached above and owned by nobody: stop its background jobs now
                     token = pre.get('cancel')
                     if token is not None:
                         token.set()
@@ -1189,7 +1372,7 @@ class PPO_OT_fill(bpy.types.Operator):
             self._next_work_redraw = now + REDRAW_SECONDS
         if getattr(self, 'timer', None) is not None:
             if (self.job is None and self.background is None and self.triangle_job is None
-                    and not self._step4_running()):
+                    and not self._step4_running() and not self._crease_running()):
                 interval = 1 / 30
             else:
                 interval = TIMER_SECONDS
@@ -1287,7 +1470,7 @@ class PPO_OT_fill(bpy.types.Operator):
                     _tag_redraw(context)
                     return
                 break
-            except Exception as exc:   # a logged refusal; Fill keeps running (the New fallback may run)
+            except Exception as exc:   # a logged refusal; Fill keeps running (the fallback search may run)
                 _log_engine_error('search', exc)
                 self.job = None
                 self.plan, self.error = None, _ENGINE_ERROR
@@ -1392,30 +1575,30 @@ class PPO_OT_fill(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             if self.loop is None:   # after a commit (Ctrl still held) there is no outline to change
                 return {"RUNNING_MODAL"}
-            if getattr(self, 'newfill_active', False):   # New engine wheel
+            if getattr(self, 'newfill_active', False):   # the fallback search's wheel
                 step = 1 if event.type == "WHEELDOWNMOUSE" else -1
                 if self.job is not None and getattr(self, 'fr_shown', False):   # first-result deadline
                     self.fr_touched = True   # S's result will be appended, not swapped in
-                    self.report({'INFO'}, iface_('Improving fill preview...'))
+                    self.report({'INFO'}, tr_rpt('Improving fill preview...'))
                     return {"RUNNING_MODAL"}
                 if self.job is not None:
-                    self.report({'INFO'}, iface_('Computing; wheel when the first result is shown'))
+                    self.report({'INFO'}, tr_rpt('Computing; wheel when the first result is shown'))
                     return {"RUNNING_MODAL"}
                 nxt = self.newfill_index + step
                 if 0 <= nxt < len(self.newfill_entries):
                     self.newfill_index = nxt
                     self.plan, self.error = self.newfill_entries[nxt], ''
                 # else clamped: wheel up at entry 1 stays; past the last entry stays (the fallback's
-                # entries are all there is, Legacy found none for this outline)
+                # entries are all there is, the main search found none for this outline)
                 _tag_redraw(context)
                 return {"RUNNING_MODAL"}
             if fill_progressive.eligible(self._settings(context)):
                 step = 1 if event.type == "WHEELDOWNMOUSE" else -1   # wheel down: next entry
                 if self._computing() or self._unseen():
-                    self.report({'INFO'}, iface_('Computing; wheel when the first result is shown'))
+                    self.report({'INFO'}, tr_rpt('Computing; wheel when the first result is shown'))
                     return {"RUNNING_MODAL"}
                 if self.triangle_job is not None:
-                    self.report({'INFO'}, iface_('Computing; wheel when the first result is shown'))
+                    self.report({'INFO'}, tr_rpt('Computing; wheel when the first result is shown'))
                     return {"RUNNING_MODAL"}
                 if self.triangle_selected and len(self.loop) % 2:
                     # no triangle-site wheel; entry 1 is the auto site plan, then the pattern entries
@@ -1474,10 +1657,10 @@ class PPO_OT_fill(bpy.types.Operator):
             if event.value == "PRESS" and not self._over_own_region(context, event):
                 return {"PASS_THROUGH"}   # a click in another area or region: never swallowed, never commits
             if event.value == "PRESS" and (self._computing() or self._unseen() or self._undrawn()):
-                self.report({"INFO"}, iface_("Computing; click when the first result is shown"))
+                self.report({"INFO"}, tr_rpt("Computing; click when the first result is shown"))
                 return {"RUNNING_MODAL"}
             if event.value == "PRESS" and self.job is not None and self.plan is None:
-                self.report({"INFO"}, iface_("Computing; click when the first result is shown"))
+                self.report({"INFO"}, tr_rpt("Computing; click when the first result is shown"))
             if event.value == "PRESS" and self.plan is not None:
                 self._commit(context)
                 if not event.ctrl:
@@ -1519,13 +1702,13 @@ class PPO_OT_fill(bpy.types.Operator):
             self._refused_ids = tuple(v.index for v in self.loop) if self.loop is not None else None
             self._drop_fallback_pre()   # its background run is not needed for a refused outline
             bmesh.update_edit_mesh(st.view.obj.data, loop_triangles=True, destructive=True)
-            self.report({"WARNING"}, iface_(fill.user_text(self.error, _debug(None))))
+            self.report({"WARNING"}, tr_rpt(fill.user_text(self.error, _debug(None))))
             return
         warning = self.plan.get("uv_warning")
         if warning == "seam":
-            self.report({"WARNING"}, iface_("The outline crosses a UV seam; unwrap the new faces"))
+            self.report({"WARNING"}, tr_rpt("The outline crosses a UV seam; unwrap the new faces"))
         elif warning == "missing":
-            self.report({"WARNING"}, iface_("Part of the outline has no faces next to it; unwrap the new faces"))
+            self.report({"WARNING"}, tr_rpt("Part of the outline has no faces next to it; unwrap the new faces"))
         for seq in (st.bm.verts, st.bm.edges, st.bm.faces):
             for elem in seq:
                 elem.select_set(False)
@@ -1539,8 +1722,6 @@ class PPO_OT_fill(bpy.types.Operator):
         # The newly selected patch includes interior edges. That is the result,
         # not an invalid outline request for the next hole.
         st.selection_error = ""
-        if self.job is not None and getattr(self, 'newfill_active', False):   # first-result deadline: S still ran
-            self._cancel_job()
         self._fr_prov, self.fr_shown = None, False
         self.loop = self.plan = self.key = None
         self._hover(context)
@@ -1553,7 +1734,7 @@ class PPO_OT_fill(bpy.types.Operator):
 
     def _busy(self):
         """Any background work for the current outline: first plan, refinement
-        (network, legacy, field, structure candidates) or triangle sites."""
+        (network, main search, field, structure candidates) or triangle sites."""
         return (self.loop is not None and
                 (self.job is not None or self.background is not None
                  or self.triangle_job is not None))
@@ -1562,6 +1743,8 @@ class PPO_OT_fill(bpy.types.Operator):
         if self._computing():
             return iface_("Computing...")
         if self._searching():
+            return iface_("Searching for a fill...") if cursor else ""
+        if self.loop is not None and self.plan is None and self._crease_running():
             return iface_("Searching for a fill...") if cursor else ""
         if self.loop is None:
             return iface_(fill.user_text(self.error, _debug(None)) or "Hover a hole, or select one closed outline")
@@ -1641,11 +1824,13 @@ class PPO_OT_fill(bpy.types.Operator):
             return iface_(fill.user_text(self.error, _debug(None))) if self.error else ""
         if self._computing():
             return iface_("Computing...")
+        if self.plan is None and self._crease_running():   # the crease-fill search may still find one
+            return iface_("Searching for a fill...")
         if self.plan is None and self.error and not self._busy():   # a refusal of this outline: say why
             return iface_(fill.user_text(self.error, _debug(None)))
         text = self._compact()
         if text and ((getattr(self, 'fr_shown', False) and self.job is not None)   # first-result deadline indicator
-                     or self._step4_tail()):   # step 4: New's run after Legacy is done
+                     or self._step4_tail()):   # step 4: the second search's run after the main search is done
             text += " · " + iface_("Improving fill preview...")
         if text and self._better_note():
             text += " · " + iface_("Better result found")

@@ -7,6 +7,8 @@ fill_hud_draw.draw(ctx, hud), which does all the drawing. Thumbnail source geome
 plane (one orientation per outline), normalised to [-0.5, 0.5] and cached per plan per outline (reset on an outline
 change)."""
 
+import time
+
 import numpy as np
 
 VISIBLE = 5
@@ -14,8 +16,8 @@ _warned = [False]
 
 
 def applicable(op):
-    """the one engine's box: a candidate shown or the search running for an outline (Legacy, or New as the
-    silent fallback); with nothing found the caller's text label explains why."""
+    """the one engine's box: a candidate shown or the search running for an outline (the main search,
+    or the second search as the silent fallback); with nothing found the caller's text label explains why."""
     if op.loop is None or getattr(op, 'error', ''):
         return False
     return (op.plan is not None or op.job is not None or getattr(op, 'background', None) is not None
@@ -234,7 +236,7 @@ def _flow(faces, uses, Q=None, scale=1.0):
 
 
 def _more_list(op):
-    """(plans, current index, still computing) of the Legacy list as the wheel walks it. The current
+    """(plans, current index, still computing) of the main search's list as the wheel walks it. The current
     cell is the shown plan by identity (None when the shown plan is not in the list: nothing is highlighted)."""
     from ..core import fill_layouts
     odd, pf, shown, busy = getattr(op, 'odd_wheel', None), getattr(op, 'portfolio', None), op.plan, op.job is not None
@@ -300,7 +302,7 @@ def _preview_calc(g):
 
 
 def displayed_plans(op):
-    """the Legacy list exactly as the box shows it (and as the wheel steps it): ranked order, or after T
+    """the main search's list exactly as the box shows it (and as the wheel steps it): ranked order, or after T
     (progressive) the ARRIVAL order, never re-sorted while shown. Returns (plans, index of the shown plan or None)."""
     plans, cur, _b = _more_list(op)
     if getattr(op, '_went_progressive', False):
@@ -330,6 +332,9 @@ def _rim_odd(op):
     return n % 2 == 1
 
 
+SECOND_DELAY = 0.3   # s: the second-search strip shows only when the second search runs at least this long
+
+
 def build_fill(op, ctx, s, size):
     """The drawing input: hud['fill'] = {n (None while searching), k (-1: none current), busy, word,
     edges_text, note, first, thumbs, phase ('legacy' / 'fallback')}."""
@@ -340,16 +345,25 @@ def build_fill(op, ctx, s, size):
     fallback = bool(getattr(op, '_fallback_here', lambda: False)())
     edges = _rim_count(op.plan) if op.plan is not None else (f"{len(op.loop)} " + tr("edges") if op.loop is not None else '')
     edges_odd = _rim_odd(op)
-    notes = []   # step 4: the New run still works after Legacy is done; then a new #1 is announced
-    if getattr(op, '_step4_tail', lambda: False)():
-        notes.append(tr('Improving fill preview...'))
-    if op._better_note():
-        notes.append(tr('Better result found'))
+    notes = []   # the second search and its news have their own strip under the main box (fill['second'])
     note = ' · '.join(notes)
+    tail_on = bool(getattr(op, '_step4_tail', lambda: False)())
+    now = time.perf_counter()
+    if not tail_on:
+        op.__dict__.pop('_step4_seen', None)
+    elif op.__dict__.get('_step4_seen') is None:
+        op.__dict__['_step4_seen'] = now
+    if op._better_note():
+        second = 'better'
+    elif tail_on and now - op.__dict__['_step4_seen'] >= SECOND_DELAY:   # no flash when it ends at once
+        second = 'search'
+    else:
+        second = None
     stage = op._display_stage() if hasattr(op, '_display_stage') else 'done'
     if fallback:
         entries = list(getattr(op, 'newfill_entries', None) or ([op.plan] if op.plan is not None else []))
-        plans, cur = entries, (0 if entries else None)
+        cur = min(max(int(getattr(op, 'newfill_index', 0) or 0), 0), len(entries) - 1) if entries else None
+        plans = entries   # the shown entry is marked (the wheel moves newfill_index)
         busy = busy or not entries   # busy held across the hand-over until the fallback result arrives
     elif stage == 'waiting':
         plans, cur = [], None   # "… / …" and the spinner; no cells, no preview yet
@@ -364,7 +378,7 @@ def build_fill(op, ctx, s, size):
         c['plans'] = {k: v for k, v in c['plans'].items() if k in live}
     if not n:
         return dict(n=None, k=-1, busy=busy, word='', edges_text=edges, edges_odd=edges_odd, note=note, first=0, thumbs=[],
-                    phase='fallback' if fallback else 'legacy', fallback=False)
+                    phase='fallback' if fallback else 'legacy', fallback=False, second=second)
     slots = min(n, VISIBLE)
     anchor = cur if cur is not None else 0
     first = 0 if n <= slots else min(max(0, anchor - slots // 2), n - slots)
@@ -378,7 +392,18 @@ def build_fill(op, ctx, s, size):
     return dict(n=None if (busy and not fallback) else n, k=cur if cur is not None else -1, busy=busy, word=word,
                 edges_text=edges, edges_odd=edges_odd, note=note, first=first, thumbs=thumbs,
                 phase='fallback' if fallback else 'legacy',
-                fallback=bool(fallback and not busy))   # the fallback's result keeps a quiet marker
+                fallback=bool(fallback and not busy),   # the fallback's result keeps a quiet marker
+                second=second)
+
+
+def _mode_label():
+    """'3D' or 'Topo' (the add-on's own words); '' when unknown."""
+    try:
+        from ..props import settings
+        from ..i18n import tr
+        return tr("3D") if settings().pen3d else tr("Topo")
+    except Exception:   # noqa: BLE001
+        return ''
 
 
 def draw_hud(op, ctx, xy, s, size):
@@ -388,7 +413,7 @@ def draw_hud(op, ctx, xy, s, size):
         bbox, start = _preview(op)
         hud = dict(region=getattr(op, 'region', None) or (ctx.region.as_pointer() if ctx.region else 0),
                    mouse=(op.mouse.x, op.mouse.y), scale=s, size=size, bounds=_bounds(ctx, s),
-                   preview_bbox=bbox, start_xy=start, fill=build_fill(op, ctx, s, size))
+                   preview_bbox=bbox, start_xy=start, fill=dict(build_fill(op, ctx, s, size), mode=_mode_label()))
         from . import fill_hud_draw
         fill_hud_draw.draw(ctx, hud)
         return hud

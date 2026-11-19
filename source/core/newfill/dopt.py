@@ -22,7 +22,7 @@ All terms except flow are barriers (-> inf at their limit); the Armijo line sear
 non-finite energies, so every accepted iterate is fold-free and inside the guards.
 
 Stages (L-BFGS each):
-  0  untangle (Garanzha-style regularised barrier, the 2.6.2 energy family) if input folds
+  0  untangle (Garanzha-style regularised barrier) if input folds
   A  TMOP:   mean kappa + w_size mean s + w_orth flow                       (smooth, fair)
   B  max-min SJ: P_p(g clipped at the immovable-corner cap) + w_reg * A, p = 8,16,32
      (skipped when an immovable rim corner already sets min SJ)
@@ -49,14 +49,6 @@ def _drive(gen):
     except StopIteration as done:
         return done.value
 
-
-def _call_steps(fn, *args, **kwargs):
-    """call fn; when it returns a generator (a *_steps function), step it here."""
-    import inspect
-    out = fn(*args, **kwargs)
-    if inspect.isgenerator(out):
-        out = yield from out
-    return out
 
 __version__ = "5.1"
 
@@ -444,11 +436,6 @@ def lbfgs_steps(fun, x0, free, iterations, memory=8, deadline=None, ftol=0.0, sc
     return x, E, it + 1
 
 
-def lbfgs(*args, **kwargs):
-    """lbfgs_steps run to its end (the synchronous form)."""
-    return _drive(lbfgs_steps(*args, **kwargs))
-
-
 # ----------------------------------------------------------------------------- helpers
 def laplace_steps(pos, n_fixed, faces, iterations=400):
     """Uniform graph-Laplacian (Tutte) placement of free vertices (CG)."""
@@ -512,13 +499,8 @@ def size_targets_steps(x, C, faces, n_fixed):
     return np.where(C.tri, 2 * tf[C.fid], tf[C.fid])   # quad corner D ~ area, triangle D = 2 area
 
 
-def size_targets(*args, **kwargs):
-    """size_targets_steps run to its end."""
-    return _drive(size_targets_steps(*args, **kwargs))
-
-
 def untangle_steps(x, C, iterations=400, theta=1.0 / 128, stop_valid=True, stop=None):
-    """Regularised-barrier untangling (Garanzha et al. 2021; the energy family 2.6.2 uses)."""
+    """Regularised-barrier untangling (Garanzha et al. 2021)."""
     e1 = x[C.a] - x[C.o]
     s = float(np.mean(np.linalg.norm(e1, axis=1))) or 1.0
 
@@ -602,11 +584,6 @@ def orient_faces_steps(faces, n_fixed):
                     seen[gj] = True
                     stack.append(gj)
     return out, changed
-
-
-def orient_faces(*args, **kwargs):
-    """orient_faces_steps run to its end."""
-    return _drive(orient_faces_steps(*args, **kwargs))
 
 
 def _plane_frame(P, n_fixed):

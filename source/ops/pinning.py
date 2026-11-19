@@ -21,9 +21,7 @@ from ..core.safe_mesh import native_modal_running
 from .common import active_tool_id
 
 PIN_LAYER = "ppo_pins"
-# pins written by earlier versions (older PolyPen releases, PolyPen_Only 1.x/2.0) are still honored
-LEGACY_PIN_LAYERS = ("hpen_pins", "polypen_only_pins")
-ALL_PIN_LAYERS = (PIN_LAYER,) + LEGACY_PIN_LAYERS
+ALL_PIN_LAYERS = (PIN_LAYER,)
 
 
 def pinned(bm, vert):
@@ -57,8 +55,8 @@ class PPO_OT_pin(bpy.types.Operator):
         if not any(v.select and not v.hide for v in bm.verts):
             # nothing selected on the active edited object (empty selection, or the
             # selection is on another object in multi-object editing): say so instead of a silent FINISHED
-            from ..i18n import tr
-            self.report({"WARNING"}, tr("Action unavailable for the current selection"))
+            from ..i18n import tr_rpt
+            self.report({"WARNING"}, tr_rpt("Action unavailable for the current selection"))
             return {"CANCELLED"}
         removed = False
         if self.unpin:

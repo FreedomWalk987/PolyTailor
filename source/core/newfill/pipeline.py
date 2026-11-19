@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 FreedomWalk
-"""New Fill engine: the fill pipeline, as ONE steppable
+"""The second Fill search (also the fallback search): the fill pipeline, as ONE steppable
 generator stepped by the modal operator (one step per timer tick).
 
 steps(world, s_ctx=None) yields None while working and returns a Result dict:
   mesh   picked mesh {positions, faces, boundary} with positions[:n] == world (None when nothing valid)
   lane   'A' | 'S' | 'E' | None
-  cands  [(lane, quality dict)] every valid candidate, best first (wheel order)
-  log    {pick, s_ran, s_stop, a_budget_hit, exc:{lane: class}, stop:{lane: class}, seconds:{lane: s}, minSJ:{lane: v}}
-A, E, the post-S dopt v4, the flow stage and the quality checks run as jobs in local worker processes (worker.py):
-pure NumPy / Python work that never touches bpy or bmesh; the caller reads and applies the results on the main
-thread. Each run has one cancel token (Token). The lane jobs check it between their steps; a step in progress
+  cands  [(part, quality dict)] every valid candidate, best first (wheel order)
+  log    {pick, s_ran, s_stop, a_budget_hit, exc:{part: class}, stop:{part: class}, seconds:{part: s}, minSJ:{part: v}}
+A, E, the post-S dopt polish, the flow stage and the quality checks run as jobs in local worker processes
+(worker.py); the caller reads and applies the results in Blender.
+Each run has one cancel token (Token). The background jobs check it between their steps; a step in progress
 finishes first (e.g. matching.max_weight_matching checks once per stage). CFG total is a hard cap: no quality check or
-flow stage starts past it. steps() sets it on every exit, so a lane job of a run stops at its next check after the run
-ends; cancel_all() cancels every run in progress and shutdown() stops the workers (add-on disable). S (the Legacy
-engine) runs in the caller's thread, step by step, under the early-refusal / cap / per-step watchdog rules of E's
+flow stage starts past it. steps() sets it on every exit, so a job of a run stops at its next check after the run
+ends; cancel_all() cancels every run in progress and shutdown() stops the workers (add-on disable). S (the main
+search) runs in Blender's own process, step by step, under the early-refusal / cap / per-step watchdog rules of E's
 deadline harness."""
 import time
 
@@ -30,7 +30,7 @@ _LIVE = set()   # the cancel tokens of the runs in progress
 
 
 class Token:
-    """a run's cancel token: a flag (set / is_set); a lane job in a worker gets it as a message."""
+    """a run's cancel token: a flag (set / is_set); a background job in a worker gets it as a message."""
     __slots__ = ('_set',)
 
     def __init__(self):
@@ -49,7 +49,7 @@ def cancel_token():
 
 
 def cancel_all():
-    """cancel every run in progress (add-on disable: ops.common.release_all). Each lane job stops
+    """cancel every run in progress (add-on disable: ops.common.release_all). Each background job stops
     at its next cancel check; a step in progress finishes first."""
     for token in list(_LIVE):
         token.set()
@@ -62,8 +62,8 @@ def shutdown():
 
 
 class _Job:
-    """One lane job in a worker process (worker.py; pure NumPy / Python, never bpy or bmesh); the caller reads the
-    result on the main thread. cancel() sets the run's token, which the job polls at its deadline checks."""
+    """One job in a worker process (worker.py); the caller reads the
+    result in Blender. cancel() sets the run's token, which the job polls at its deadline checks."""
     def __init__(self, fn, *args, token=None):
         from . import worker
         self._done, self.result, self.exc, self.token, self.fn = False, None, None, token, fn
@@ -88,7 +88,7 @@ class _Job:
 def _sq(qiso, c):
     """The SJ threshold of the shipped S trigger (band rule)."""
     sq = c['sq']
-    if qiso < c['q_band']:   # a band-like outline also runs the S lane while A's minSJ < 0.8
+    if qiso < c['q_band']:   # a band-like outline also runs the S part while A's minSJ < 0.8
         sq = max(sq, c['sq_band'])
     return sq
 
@@ -131,7 +131,7 @@ def _quick(mesh, world, token=None, log=None, lane=None, left=None):
     yield from _wait(j)
     if j.exc is not None:
         if log is not None and not (token is not None and token.is_set()):
-            if isinstance(j.exc, quality.Stopped):
+            if type(j.exc).__name__ == 'Stopped':   # quality.Stopped, rebuilt from its class name
                 log['stop']['quick_' + str(lane)] = 'total'
             else:
                 log['exc']['quick_' + str(lane)] = type(j.exc).__name__
@@ -140,7 +140,7 @@ def _quick(mesh, world, token=None, log=None, lane=None, left=None):
 
 
 def _run_a(world, budget, cancel=None, stamp=None):
-    """A running job of a cancelled run returns its best so far or refuses at its next DP step; a queued one refuses
+    """A running job of a cancelled run returns its best so far or refuses at its next DP step; a waiting one refuses
     without running (the run's token, set before or after A starts). stamp['t'] is when A
     starts; waiting for another run's A is not A's time (its own budget already starts inside fill_a). One A at a
     time: worker.py dispatches the next A when the previous one has ended."""
@@ -177,7 +177,7 @@ def _run_dopt(mesh, budget, cancel=None, flags=None):
 
 
 def _run_flow(mesh, deadline, cancel=None, flags=None):
-    from . import flow_stage2   # v2 (v1 froze band zig-zags at the min-SJ floor; same floor, same guarantee)
+    from . import flow_stage2   # keeps the min-SJ floor without freezing band zig-zags
     t = time.perf_counter()
     out = flow_stage2.smooth(mesh, deadline_s=deadline, cancel=cancel)
     if flags is not None and time.perf_counter() - t >= deadline:
@@ -203,9 +203,9 @@ def _stop_class(exc):
 
 
 def s_steps(ctx, world, budget_s, t_first_s, grace_s, info, cancel=None):
-    """The S lane as a generator: an isolated throwaway instance,
+    """The S part (the main search) as a generator: an isolated throwaway instance,
     pinned settings (FLOW, floor 0.20, settle off for the instance, AUTO pattern), early refusal and step cap. The
-    S deadline (and the run's cancel token) is checked cooperatively at every step boundary of the Legacy engine.
+    S deadline (and the run's cancel token) is checked cooperatively at every step boundary of the main search.
     with ctx['clock'] (the hidden precompute) the deadlines run on active time: the time the caller
     leaves this generator suspended is not counted while clock['active'] (the takeover turns it off: real time again).
     no preference is read during the run (Search pinned FAST; the other Fill options are fixed).
@@ -229,7 +229,7 @@ def s_steps(ctx, world, budget_s, t_first_s, grace_s, info, cancel=None):
     if hasattr(op.PPO_OT_fill, '_cuts_steps'):
         inst._cuts_steps = types.MethodType(op.PPO_OT_fill._cuts_steps, inst)
     inst._settle = lambda: None
-    inst.newfill_more = True   # pins Search FAST / Ranking FLOW in the Legacy engine (ops._legacy_pref)
+    inst.newfill_more = True   # pins Search FAST / Ranking FLOW in the main search (ops._legacy_pref)
     st = dict(pattern='AUTO', rotation=-1, boundary_shift=0, _ranking='FLOW', _quality_floor=.20)
 
     class _Stop(Exception):
@@ -259,7 +259,7 @@ def s_steps(ctx, world, budget_s, t_first_s, grace_s, info, cancel=None):
         left = t_end + grace_s - now()
         if left <= 0:
             raise DeadlineExceeded
-        return next(job)   # a step is short (p99.9 19 ms on DEV+STRESS); the check runs at every step boundary
+        return next(job)   # a step is short; the check runs at every step boundary
 
     def consume(job, acc=True):
         try:
@@ -323,8 +323,8 @@ def _qiso(world):
 
 
 def _flatten(mesh):
-    """Project the interior onto the rim's best plane (through the rim centre); the rim is unchanged. The Legacy
-    engine lifts its interior harmonically; the New engine's quality check works in the rim plane and to_plan lifts."""
+    """Project the interior onto the rim's best plane (through the rim centre); the rim is unchanged. The main
+    search lifts its interior harmonically; this search's quality check works in the rim plane and to_plan lifts."""
     P = np.asarray(mesh['positions'], float); n = int(mesh['boundary'])
     if len(P) <= n:
         return mesh
@@ -362,7 +362,7 @@ def _pick(cands, tie):
 
 def steps(world, s_ctx=None, cancel=None):
     """The pipeline generator (module docstring). cancel: this run's token (cancel_token(); made when None). The finally
-    sets it on every exit (finished, closed by the caller, or failed): no lane job of the run keeps working.
+    sets it on every exit (finished, closed by the caller, or failed): no background job of the run keeps working.
     """
     token = cancel if cancel is not None else cancel_token()
     _LIVE.add(token)   # cancel_all reaches it
@@ -382,18 +382,18 @@ def _steps(world, s_ctx, token):
     c = CFG
     world = np.asarray(world, float); n = len(world)
     t0 = time.perf_counter(); log = dict(pick=None, s_ran=False, s_stop=None, a_budget_hit=False, exc={}, stop={}, seconds={}, minSJ={})
-    flags = {}   # lanes whose own time budget cut their result (E, dopt 'D', flow)
-    with np.errstate(all='ignore'):   # NaN / Inf / duplicate / collinear rims refuse at once (no lanes)
+    flags = {}   # search parts whose own time budget cut their result (E, dopt 'D', flow)
+    with np.errstate(all='ignore'):   # NaN / Inf / duplicate / collinear rims refuse at once (no search parts)
         degenerate = (n < 3 or not np.isfinite(world).all() or len(np.unique(world, axis=0)) < n
                       or not _qiso(world) >= 1e-9)
     if degenerate:
         log['stop']['input'] = 'degenerate'; log['seconds']['total'] = 0.; log['degraded'] = []
         log['cancelled'] = token.is_set()
         return dict(mesh=None, lane=None, cands=[], log=log)
-    clock = (s_ctx or {}).get('clock')   # the hidden precompute's S-lane active-time clock
+    clock = (s_ctx or {}).get('clock')   # the hidden precompute's S-part active-time clock
 
     def elapsed():
-        """The run's time; with an active clock, the S lane's idle gaps between its slices are not counted."""
+        """The run's time; with an active clock, the S part's idle gaps between its slices are not counted."""
         return time.perf_counter() - t0 - (clock['paused'] if clock is not None else 0.)
 
     def left():
@@ -446,7 +446,7 @@ def _steps(world, s_ctx, token):
             yield from _wait(dj)
             md = lane_done('D', dj, t)
             if md is not None:
-                ms = _flatten(md)   # dopt v4 works in its own frame; back onto the rim plane
+                ms = _flatten(md)   # dopt_v4 works in its own frame; back onto the rim plane
         qs = (yield from _quick(ms, world, token, log, 'S', left())) if ms is not None else None
         if qs is not None:
             log['minSJ']['S'] = qs['minSJ']
@@ -493,9 +493,9 @@ def _steps(world, s_ctx, token):
 
 
 def to_plan(mesh, lane, lift=True):
-    """adapter: a New-engine mesh (positions[:n] == world rim, in loop order) -> the 2.6.x plan dict that
+    """adapter: a second-search mesh (positions[:n] == world rim, in loop order) -> the plan dict that
     validate_plan / faces_of / commit / project_steps accept. Faces come from the scorer's normalised (CCW) mesh.
-    lift: interior heights above the rim's plane are harmonic from the loop, as 2.6.x's solve_steps does (pen3d)."""
+    lift: interior heights above the rim's plane are harmonic from the loop, as the main search's solve_steps does (pen3d)."""
     from ..patterns import geom
     P = np.asarray(mesh['positions'], float); n = int(mesh['boundary']); F = [tuple(int(i) for i in f) for f in mesh['faces']]
     nrm = quality._plane(P, n)
