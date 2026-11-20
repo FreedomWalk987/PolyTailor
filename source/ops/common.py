@@ -98,12 +98,12 @@ def release_all():
 def clear_caches():
     """Empty the exact memo and phase caches of the fill modules (add-on unregister)."""
     try:
-        from ..core import memo_jobs, boundary_preview, fill_p1
+        from ..core import memo_jobs, boundary_preview, fill_p1, fill_surface
         from ..core.patterns import chords, solver
         from ..core.newfill import apattern, fallback5
     except Exception:
         return
-    for module in (memo_jobs, chords, boundary_preview, solver, apattern, fill_p1, fallback5):
+    for module in (memo_jobs, chords, boundary_preview, solver, apattern, fill_p1, fallback5, fill_surface):
         try:
             module.clear_caches()
         except Exception:

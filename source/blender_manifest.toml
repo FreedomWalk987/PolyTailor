@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "polytailor"
-version = "1.1.0-s4b6"
+version = "1.1.0"
 name = "PolyTailor"
 tagline = "Retopology and mesh building: build, fill and relax quads"
 maintainer = "FreedomWalk"

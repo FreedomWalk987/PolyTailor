@@ -3,7 +3,7 @@
 """Public release identity."""
 
 NAME = "PolyTailor"
-VERSION = "1.1.0-s4b6"
+VERSION = "1.1.0"
 
 
 def version_label():

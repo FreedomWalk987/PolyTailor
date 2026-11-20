@@ -47,6 +47,7 @@ Blender's own icons.
 
 Blender: Edit > Preferences > Get Extensions > Install from Disk, choose the zip, enable
 **PolyTailor**. Needs Blender 4.5 or newer. Tested in Blender 5.2.3, on Windows only.
+After updating PolyTailor, restart Blender.
 
 Extension ID: `polytailor`.
 
@@ -54,8 +55,9 @@ Extension ID: `polytailor`.
 
 - Object Mode: Shift+A > Mesh > **New Mesh (3D)** / **Retopology Mesh (Topo)** (also in the
   sidebar's PolyTailor tab). New Mesh (3D) adds an empty mesh at the 3D Cursor in 3D mode;
-  Retopology Mesh (Topo) adds one on the active object in Topo mode and sets Sidebar > Sources
-  to that object. Edit Mode and Build start, and Ctrl+click places the first vertex.
+  Retopology Mesh (Topo) adds one on the active object in Topo mode; Sidebar > Sources is left as
+  you set it, so every visible object is a source unless you limit it. Edit Mode and Build start,
+  and Ctrl+click places the first vertex.
 - Any visible mesh (or curve / text with faces) in Object Mode is a *source*: new and
   moved points land on it while snapping (the magnet) is on.
 
@@ -148,8 +150,8 @@ Topo only non-edited objects (the source), so points never snap to the mesh bein
 
 Two mutually exclusive text buttons in the W Snapping box, sidebar Snapping panel and tool
 header choose modeling or retopology. New scenes start in 3D, unless the file or your saved
-defaults say otherwise. While 3D is selected, no PolyTailor tool snaps to other objects, auto merges or stops
-at the source edge:
+defaults say otherwise. While 3D is selected, no PolyTailor tool snaps to other objects or stops at the source
+edge, and Auto Merge is off (a Build drag that ends on a vertex still joins it, as a click there would):
 Build places points at the depth of the vertex it extends from, left-drag / G / E /
 Tweak move at that depth, and Relax keeps the mesh on its own shape (as it was when
 the stroke began) so curved surfaces do not shrink. Selecting Topo restores the
@@ -187,16 +189,16 @@ snapping, Auto Merge and Stop at Edge you had before. Snapping can still be turn
 
 ## Sidebar (N > PolyTailor)
 
-PolyTailor (tools and the current tool's settings, including Build's Alt+Wheel Smooth),
-Snapping, Sources, Constraint Tools, Display & Mirror, Defaults, Shortcuts. Less used sections start
-folded.
+PolyTailor (tools, a hint for the W wheel, the current tool's settings including Build's
+Alt+Wheel Smooth, and the Constraint Tools row), Snapping, Select Mode, Sources, Display & Mirror,
+Defaults, Shortcuts. Less used sections start folded.
 
 ## Automatic setup
 
 While a PolyTailor tool is active, PolyTailor sets vertex + edge select mode and a 0.1 mm Auto Merge
 distance; in Topo it also turns on the retopology overlay, surface snapping (other objects only) and
 Auto Merge in every tool (it welds dragged, placed and moved vertices; brush strokes never merge); 3D
-turns Auto Merge off. PolyTailor leaves
+turns Auto Merge off (a Build drag that ends on a vertex still joins it, as a click there would). PolyTailor leaves
 Correct Face Attributes as you set it (Blender's default is off). Everything
 is restored when you leave PolyTailor. The setup can be turned off in the add-on preferences.
 

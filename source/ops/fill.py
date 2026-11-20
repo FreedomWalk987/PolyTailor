@@ -374,7 +374,7 @@ class PPO_OT_fill(bpy.types.Operator):
         run = getattr(self, '_crease_run', None)
         return run is not None and not run['done']
 
-    def _crease_tail(self, context):
+    def _crease_tail(self, context, until=None):
         """After the main search ends (with or without a candidate; not after a certain refusal), Topo mode on an even
         outline: the crease-fill search (fill_crease.tail_steps: detection, a quick crease fill, the wider search) runs
         in idle slices before the second search, so it never slows or changes the main search. Its fills join the
@@ -404,7 +404,8 @@ class PPO_OT_fill(bpy.types.Operator):
                                           done=False, srcs=self.state.view.srcs)
         if run['done']:
             return False
-        deadline = time.perf_counter() + STEP4_IDLE_SECONDS
+        # until: the end of the tail's share of this tick (shared with the step-4 run, _advance)
+        deadline = time.perf_counter() + STEP4_IDLE_SECONDS if until is None else until
         try:
             while time.perf_counter() < deadline:
                 if run['srcs'] is not self.state.view.srcs:   # the sources were read again: drop this run
@@ -419,7 +420,10 @@ class PPO_OT_fill(bpy.types.Operator):
         except StopIteration as done:
             run['done'] = True
             if done.value is not None and run['srcs'] is self.state.view.srcs:
-                self._crease_join(done.value)
+                try:
+                    self._crease_join(done.value)
+                except Exception as exc:   # noqa: BLE001  (Fill keeps the main search's fills)
+                    _log_engine_error('crease search', exc)
         except Exception as exc:   # noqa: BLE001  (Fill continues without the crease fill)
             run['done'] = True
             _log_engine_error('crease search', exc)
@@ -427,12 +431,13 @@ class PPO_OT_fill(bpy.types.Operator):
 
     def _crease_drop(self):
         """a crease run whose sources were read again: closed, and its fills taken out of the candidates (the shown
-        fill follows the default when it was one of them)."""
+        fill follows the default when it was one of them). The run starts again on the next idle tick."""
         run = getattr(self, '_crease_run', None)
         if run is not None:
             run['gen'].close()
             run['done'] = True
         self._crease = None
+        self._crease_run = self._crease_ids = None   # once per outline and options: this outline runs again
         pf = self.portfolio
         from ..core import fill_layouts
         keys = [k for k in pf.entries if fill_layouts._is_crease(k)]
@@ -801,7 +806,7 @@ class PPO_OT_fill(bpy.types.Operator):
             self.report({"WARNING"}, tr_rpt(fill.user_text(self.error, _debug(None))))   # also on the cursor line
         _tag_redraw(context)
 
-    def _fallback_precompute(self, context):
+    def _fallback_precompute(self, context, until=None):
         """with no main-search candidate after FALLBACK_PRE_SECONDS, step the second search in idle
         slices (never shown). Step 4: also started when the main search ends with a candidate; not dropped when
         the main search finds one, but never stepped while the main search runs with a candidate (it keeps its
@@ -823,6 +828,7 @@ class PPO_OT_fill(bpy.types.Operator):
                 and getattr(self, '_step4_blocked', None) is not self.portfolio   # dropped as stale: next re-plan
                 and not getattr(self, '_surface_pending', False)   # the outline's layout is still being made
                 and ((self._legacy_busy() and self.plan is None
+                      and (getattr(self, '_surface', None) is None or self._surface.plain)   # the fallback's outline
                       and time.perf_counter() - getattr(self, 'replan_started', time.perf_counter()) >= FALLBACK_PRE_SECONDS)
                      or (self.loop is not None and self.plan is not None and not self._busy()
                          and not self._fallback_here()))):   # step 4: the main search ended with a candidate
@@ -841,10 +847,14 @@ class PPO_OT_fill(bpy.types.Operator):
                                              if a in self._HIDDEN_ATTRS})   # starts as a copy of the shown values
         if pre is None or pre['done']:
             return
+        if until is not None and until - time.perf_counter() < STEP4_IDLE_SECONDS / 4:
+            return   # too little of the tick's shared budget left: the run (started above) steps next tick
         if self._legacy_busy() and self.plan is not None:
             return   # step 4: paused while the main search runs with a candidate (resumed when it ends)
         idle = self.plan is not None   # step 4 after the main search's end (a busy one with a candidate returned above)
         deadline = time.perf_counter() + (STEP4_IDLE_SECONDS if idle else FALLBACK_PRE_SLICE)
+        if until is not None:   # the tick's budget shared with the crease tail (_advance)
+            deadline = min(deadline, until)
         visible = self._swap_hidden_state(pre['state'])   # the hidden run never touches the shown one
         try:
             while time.perf_counter() < deadline:
@@ -1320,8 +1330,16 @@ class PPO_OT_fill(bpy.types.Operator):
         self._advance_work(context)
         self._surface_fallback(context)   # no fill on the flat outline: planned again on the plane
         self._legacy_cap(context)   # 10 s total search cap
-        if not self._crease_tail(context):   # the wider crease-fill search first, then the second search
-            self._fallback_precompute(context)
+        if self.plan is None:   # no candidate: the crease tail first, the fallback precompute in unused ticks
+            if not self._crease_tail(context):
+                self._fallback_precompute(context)
+        else:
+            # step 4: the wider crease-fill search and the hidden second search run alongside in this tick and
+            # share one STEP4_IDLE_SECONDS budget: while the second search is working the tail gets the first half
+            tick_end = time.perf_counter() + STEP4_IDLE_SECONDS
+            share = time.perf_counter() + STEP4_IDLE_SECONDS / 2 if self._step4_running() else tick_end
+            self._crease_tail(context, until=share)
+            self._fallback_precompute(context, until=tick_end)
         self._step4_join(context)   # step 4: the second search's pick joins the main-search candidates
         self._hold_shown()   # display timing
         if (self.loop is not None and self.plan is None and self.job is None and self.background is None
@@ -1732,6 +1750,11 @@ class PPO_OT_fill(bpy.types.Operator):
         return (self.loop is not None and self.plan is None and
                 (self.job is not None or self.background is not None))
 
+    def _searching_shown(self):
+        """display only (spinner): busy, or the crease-fill search still working for this outline with no fill yet.
+        _busy() leaves the crease search out on purpose (its callers start the tail and the second search)."""
+        return self._busy() or (self.loop is not None and self.plan is None and self._crease_running())
+
     def _busy(self):
         """Any background work for the current outline: first plan, refinement
         (network, main search, field, structure candidates) or triangle sites."""
@@ -1869,7 +1892,8 @@ class PPO_OT_fill(bpy.types.Operator):
 
     def _label_kind(self):
         """A refusal / error at the cursor (no preview, an error text) is a warning; the rest is info."""
-        return 'warning' if self.error and self.plan is None and not self._computing() else 'info'
+        return ('warning' if self.error and self.plan is None and not self._computing()
+                and not self._crease_running() else 'info')   # the crease-fill search may still find one
 
     def _draw(self):
         context = bpy.context
@@ -1968,7 +1992,7 @@ class PPO_OT_fill(bpy.types.Operator):
             text = self.compact()
             if text:
                 draw.cursor_label(context, xy, text, kind=self._label_kind(), size=size)
-            if self._busy():
+            if self._searching_shown():
                 center = (xy[0] + 6*scale, xy[1] - 12*scale)
                 phase = (time.perf_counter()*1.25 % 1.)*math.tau   # wall clock: steady across timer changes
                 draw.ring(center, 5*scale, palette.secondary(context, .4), 1.2*scale)
@@ -1992,7 +2016,7 @@ class PPO_OT_fill(bpy.types.Operator):
                 draw.text((self.mouse.x + 18, self.mouse.y - 44 - i*18),
                           marker + f'{i+1} | ' + fill_flow.short_label(plan, self.portfolio.quality_floor), palette.main(context))
         if text:
-            if self._busy():
+            if self._searching_shown():
                 scale = max(.5, min(3., prefs.ui_scale(context)))
                 center = (self.mouse.x+20*scale, self.mouse.y-20*scale)
                 phase = (time.perf_counter()*1.25 % 1.)*math.tau   # wall clock: steady across timer changes

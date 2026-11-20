@@ -189,7 +189,7 @@ ZH_HANT = {
     "Restore the default brush radius, strength and falloff (Relax also restores its algorithm settings)":
         "恢復預設的筆刷半徑、力量與衰減（放鬆也會恢復演算法設定）",
     "Brush:": "筆刷：",
-    "Selected:": "選取：",
+    "Selected:": "所選項：",
     "Boundary:": "邊界：",
     "Stop at Edge": "邊緣限制",
     "With surface snapping on, points moved past the edge of the source stop at the edge instead of leaving the surface":
@@ -207,7 +207,7 @@ ZH_HANT = {
     "Constraint Tools": "固定工具",
     "Keep each connected selected chain rigid during Relax, Tweak and Alt+Wheel; the whole chain can still move and rotate": "選取的相連鏈在放鬆、調校與 Alt＋滾輪時保持剛性，整條仍可移動與旋轉",
     "Select a connected edge chain to Glue": "請選取相連的邊鏈以黏合",
-    "Select a Glue member to unglue": "請選取黏合成員以解除整條黏合",
+    "Select a Glue member to unglue": "請選取要解除黏合的部分",
     "Finish the active transform first": "請先完成目前的變換操作",
     "Preview Fill": "預覽面填色",
     "Preview Border": "預覽線條顏色",
@@ -241,9 +241,9 @@ ZH_HANT = {
     "Set up surface snapping and the overlay while a PolyTailor tool is active; restore on exit": "使用 PolyTailor 時設定表面吸附與疊層，離開工具時還原",
     "Show Wheel Hint": "顯示輪盤提示",
     "Dense Relax Feedback": "高面數放鬆即時顯示（實驗）",
-    "Experimental local display for dense 3D Relax in Solid retopology views; full native display synchronizes on release": "高面數 3D 放鬆時使用局部顯示；限實體重拓撲視圖，放開後同步完整原生顯示",
-    "Model instead of retopologize: no snapping to other objects, no Auto Merge and no Stop at Edge in any PolyTailor tool; Relax keeps the mesh on its own shape. Turn off for the Topo defaults":
-        "改為建模而非重拓撲：所有 PolyTailor 工具都不吸附其他物件、不自動合併、不做邊緣限制；放鬆讓網格維持自己的形狀。關閉後套用重拓撲預設設定",
+    "Local display for dense 3D Relax in Solid retopology views; the full display updates on release": "高面數 3D 放鬆時使用局部顯示（限實體重拓撲視圖），放開後更新完整顯示",
+    "Model instead of retopologize: no snapping to other objects, Auto Merge off and no Stop at Edge in any PolyTailor tool; Relax keeps the mesh on its own shape. Turn off for the Topo defaults":
+        "改為建模而非重拓撲：所有 PolyTailor 工具都不吸附其他物件、關閉自動合併、不做邊緣限制；放鬆讓網格維持自己的形狀。關閉後套用重拓撲預設設定",
     'PolyTailor Settings': 'PolyTailor 設定',
     "This object's transform has a zero scale; fix the scale of the object or its parents": '這個物件的變換有縮放為零的情況；請修正物件或其父物件的縮放',
 }

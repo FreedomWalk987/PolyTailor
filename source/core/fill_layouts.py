@@ -237,22 +237,23 @@ class Portfolio:
     def crease_rank(self, plan):
         """The order of crease fills (smaller first): one that would be the default over the other candidates first,
         then the fewest interior poles, then the highest minQ."""
-        rest = [p for _s, p in self.entries.values() if not p.get('_crease_candidate')]
+        rest = [p for _s, p in self.entries.values()   # the step-4 fill is left out: it may join mid-search
+                if not p.get('_crease_candidate') and not p.get('_step4_candidate')]
         if self.legacy is not None:
             rest.append(self.legacy)
         base = self._r1_choice(rest) if rest else None
         return (_crease_choice(plan, base, self.quality_floor) is not plan,) + _crease_rank(plan)
 
     def _crease_slot(self, key, plan):
-        """One crease entry: a new crease fill replaces the kept one only when it ranks before it (crease_rank), and
-        never while the wheel holds the kept one. True when the new fill may be added."""
+        """One crease entry: a new crease fill replaces the kept one only when it ranks before it (crease_rank). When
+        the wheel holds the kept one, the hold moves to the new fill (it takes the kept one's place). True when the
+        new fill may be added."""
         old = [k for k in self.entries if _is_crease(k) and k != key]
         if not old:
             return True
-        if self.locked and self.selected in old:
-            return False
         if self.crease_rank(plan) >= min(self.crease_rank(self.entries[k][1]) for k in old):
             return False
+        held = self.locked and self.selected in old
         for k in old:
             self.entries.pop(k, None)
             self.placements.pop(k, None)
@@ -261,6 +262,8 @@ class Portfolio:
                 self.default = None
             if self.selected == k:
                 self.selected = None
+        if held:
+            self.selected = key   # the user's crease entry, now its better fill: still the held choice
         return True
 
     def _plan_of(self, key):

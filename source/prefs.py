@@ -59,7 +59,7 @@ class PPO_Preferences(bpy.types.AddonPreferences):
         update=_auto_setup_update,
         description="Set up surface snapping and the overlay while a PolyTailor tool is active; restore on exit")
     dense_feedback: BoolProperty(translation_context="Poly Toolset", name="Dense Relax Feedback", default=False,
-        description="Experimental local display for dense 3D Relax in Solid retopology views; full native display synchronizes on release")
+        description="Local display for dense 3D Relax in Solid retopology views; the full display updates on release")
     fill_search_mode: EnumProperty(translation_context="Poly Toolset", name="Search", default='FAST', description="How widely Fill searches",
         items=(('FAST', 'Fast search', 'Try the most likely layouts first; search fully only if the result is poor. '
                 'Odd outlines always search fully'),

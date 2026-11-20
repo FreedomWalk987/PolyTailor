@@ -424,6 +424,9 @@ class Surface:
         self.c, self.e1, self.e2, self.N = frame
         self.uv, self.T, self.V, self.normals, self.ok = uv, T, V, normals, ok
         self.h, self.key, self.vids = h, key, vids
+        # the other corners of the patch's checked n-gons (fan / ear / kept) and their world positions as read:
+        # still_valid compares them too (a verdict depends on every corner of its polygon)
+        self.ngon_ids, self.ngon_W = np.zeros(0, dtype=np.int64), np.zeros((0, 3))
         self.plain = False   # the outline's main search went back to the plain path (its flat plans still map)
         self.seconds = 0.0   # seconds, mapped, folds: counters for tests only
         self.mapped = self.folds = 0
@@ -506,11 +509,13 @@ class Surface:
         try:
             mw = np.array(obj.matrix_world, dtype=np.float64)
             verts = obj.data.vertices
-            co = np.array([tuple(verts[int(i)].co) for i in self.vids], dtype=np.float64)
+            ids = np.concatenate((np.asarray(self.vids, dtype=np.int64), self.ngon_ids))
+            co = np.array([tuple(verts[int(i)].co) for i in ids], dtype=np.float64)
         except (ReferenceError, AttributeError, IndexError):
             return False
         W = co @ mw[:3, :3].T + mw[:3, 3]
-        return W.shape == self.V.shape and bool(np.allclose(W, self.V, rtol=0.0, atol=self.h * 1e-6))
+        ref = np.concatenate((self.V, self.ngon_W)) if len(self.ngon_ids) else self.V
+        return W.shape == ref.shape and bool(np.allclose(W, ref, rtol=0.0, atol=self.h * 1e-6))
 
 
 def min_q(positions, faces, normals, orient):
@@ -731,7 +736,15 @@ def _build_steps(W, srcs):
     flat = c + ruv[:, :1] * e1 + ruv[:, 1:2] * e2
     sa = _signed(uv, T)
     _cen, fn = normals(pf)
-    return Surface(W, flat, (c, e1, e2, N), uv, T, V, fn, sa > 0, h, (_mesh_key(obj),), vids)
+    surface = Surface(W, flat, (c, e1, e2, N), uv, T, V, fn, sa > 0, h, (_mesh_key(obj),), vids)
+    if mesh.checked:   # every corner of each checked n-gon of the patch (still_valid compares them)
+        polys = np.unique(np.searchsorted(mesh.first, pf, side='right') - 1).tolist()
+        rows = [np.arange(mesh.first[p], mesh.first[p + 1]) for p in polys if p in mesh.checked]
+        if rows:
+            extra = np.unique(mesh.tri[np.concatenate(rows)])
+            extra = extra[~np.isin(extra, vids)].astype(np.int64)
+            surface.ngon_ids, surface.ngon_W = extra, world(extra)
+    return surface
 
 
 def _rim_uv(uv, T, V, pf, rimq, rimf, mesh):
@@ -808,6 +821,14 @@ def _flatten_steps(V, T, pf, vids, rimq, rimf, mesh, frame, rim_tris, world, fli
 
 _WORK = [0.0]   # seconds of work in part_steps so far (the crease search does not count it against its caps)
 PART_SECONDS = 3.0   # work the part layouts of one crease search may take; after it, parts stay on the plane
+
+
+def clear_caches():
+    """the cached source meshes and layouts, and the part-layout work counter (add-on unregister)."""
+    _MESHES.clear()
+    _MAIN.clear()
+    _PARTS.clear()
+    _WORK[0] = 0.0
 
 
 def work_seconds():

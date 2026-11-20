@@ -17,16 +17,51 @@ def glue_selection(bm, remove=False):
     vl = bm.verts.layers.int.get(VERT_LAYER)
     el = bm.edges.layers.int.get(EDGE_LAYER)
     if remove:
-        groups = {int(v[vl]) for v in bm.verts if vl is not None and v.select and not v.hide and v[vl] > 0}
-        if not groups:
+        if vl is None:
             return 0, False
-        for v in bm.verts:
-            if v[vl] in groups:
-                v[vl] = 0
+        chosen = {v.index for v in bm.verts if v.select and not v.hide and v[vl] > 0}
+        if not chosen:
+            return 0, False
+        groups = {int(bm.verts[i][vl]) for i in chosen}
+        # a link: an edge whose value and both ends carry the same group id
+        links = [e for e in bm.edges if el is not None and e[el] > 0
+                 and int(e.verts[0][vl]) == int(e.verts[1][vl]) == int(e[el])]
+        cut = {e.index for e in links if not e.hide and all(v.index in chosen for v in e.verts)}
+        covered = {v.index for e in links if e.index in cut for v in e.verts}
+        loose = chosen - covered   # a selected vertex without a fully selected link: released with its links
+        cut.update(e.index for e in links if any(v.index in loose for v in e.verts))
+        members = [v.index for v in bm.verts if int(v[vl]) in groups]
+        parent = {i: i for i in members}
+        def root(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        for e in links:   # the touched groups split into parts over the links that remain
+            if e.index not in cut and int(e[el]) in groups:
+                parent[root(e.verts[0].index)] = root(e.verts[1].index)
+        parts = {}
+        for i in members:
+            if i not in loose:
+                parts.setdefault(root(i), []).append(i)
+        next_id = max([int(v[vl]) for v in bm.verts] + [int(e[el]) for e in bm.edges] if el is not None
+                      else [int(v[vl]) for v in bm.verts])+1   # above every id of both layers
+        if next_id+len(parts) >= 2**31:
+            raise ValueError("Too many Glue groups")
+        renamed, offset = {}, 0
+        for part in parts.values():
+            group = 0
+            if len(part) >= 2:   # a 1-vertex part is released
+                group, offset = next_id+offset, offset+1
+            renamed.update((i, group) for i in part)
+        kept = {e.index for e in links if e.index not in cut}
         if el is not None:
             for e in bm.edges:
-                if e[el] in groups:
-                    e[el] = 0
+                if int(e[el]) in groups:
+                    a, b = (renamed.get(v.index, 0) for v in e.verts)
+                    e[el] = a if e.index in kept and a == b and a > 0 else 0
+        for i in members:
+            bm.verts[i][vl] = renamed.get(i, 0)
         dropped = False
         if not any(v[vl] > 0 for v in bm.verts):
             bm.verts.layers.int.remove(vl)

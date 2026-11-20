@@ -411,6 +411,8 @@ def for_move(context, mouse_xy, delta_xy, mw, originals, srcs, active=None, *, e
             if best is None or d < best[0]:
                 best = (d, v)
         base_vert = best[1] if best else None
+    if base_vert is None and mode == "CLOSEST":
+        return None   # no moved vertex is on screen: no snap base
     if base_vert is not None:
         base = worlds[base_vert]
     base_xy = raycast.to_screen(context, base)

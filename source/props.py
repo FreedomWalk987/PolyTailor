@@ -72,7 +72,7 @@ class PPO_SceneSettings(bpy.types.PropertyGroup):
         default=False)
     pen3d: BoolProperty(translation_context="Poly Toolset", 
         name="3D",
-        description="Model instead of retopologize: no snapping to other objects, no Auto Merge "
+        description="Model instead of retopologize: no snapping to other objects, Auto Merge off "
                     "and no Stop at Edge in any PolyTailor tool; Relax keeps the mesh on its own shape. "
                     "Turn off for the Topo defaults",
         default=True, update=lambda self, context: _pen3d_changed(self, context))

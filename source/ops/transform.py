@@ -458,8 +458,10 @@ class PPO_OT_slide(bpy.types.Operator):
             self.timer = None
             context.window_manager.event_timer_remove(timer)
             bm = bmesh.from_edit_mesh(self.obj.data)
-            if bm is not self.edit_bm:
-                raise RuntimeError("Edit mesh was replaced during slide")
+            if bm is not self.edit_bm:   # another script rebuilt the edit mesh during the slide
+                self.snapshot.close()
+                self.report({"WARNING"}, tr_rpt("The mesh being edited changed; the tool stopped"))
+                return {"CANCELLED"}
             for elements in (bm.verts, bm.edges, bm.faces):
                 elements.ensure_lookup_table()
                 elements.index_update()
@@ -481,6 +483,7 @@ class PPO_OT_slide(bpy.types.Operator):
                 mw = self.obj.matrix_world
                 mi = mw.inverted()
                 srcs = raycast.sources(context)
+                clip = MirrorClip(self.obj)   # as Drag: a vertex on a clipped mirror plane stays on it
                 from ..core.face_attributes import Correction
                 self.attributes = Correction(bm, context)
                 moved = []
@@ -488,7 +491,7 @@ class PPO_OT_slide(bpy.types.Operator):
                     if v.select and not v.hide:
                         hit = raycast.nearest_on_sources(context, mw @ v.co, srcs)
                         if hit:
-                            v.co = mi @ hit.world
+                            v.co = clip.apply(v.co.copy(), mi @ hit.world)
                             moved.append(v)
                 self.attributes.apply(moved)
                 self.attributes.close()

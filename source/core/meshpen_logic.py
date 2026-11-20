@@ -808,7 +808,6 @@ class BuildStroke:
     def _append_plain(self, xy, final):
         if (xy - self.raw[-1]).length >= (0.01 if final else self.dead_zone):
             self.raw.append(xy)
-            self._tip = xy.copy()
             self._reach = max(getattr(self, "_reach", 0.0), (xy - self.raw[0]).length)   # farthest from the start
             return True
         return False
@@ -851,7 +850,6 @@ class BuildStroke:
             self._emptied = True
         elif (q - raw[-1]).length > 0.01:
             raw.append(q)
-        self._tip = raw[-1].copy()
         return True
 
     def _release_jitter(self, xy):

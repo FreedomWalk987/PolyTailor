@@ -28,6 +28,7 @@ from ..core import draw, raycast, safe_mesh, snap, units
 from ..core.pick import MeshView
 from ..core.mesh import MeshSnapshot, merge_moved, adaptive_radius
 from .brush import MirrorClip
+from .pinning import pinned
 from ..core.meshpen_logic import (MeshPenLogic, BuildStroke, strip_rows, relieve_strip,
                                   strip_cell_normal, segment_closest, flip_toward_view,
                                   chain_sides_with_faces,
@@ -44,6 +45,7 @@ CHAIN_REASONS = {
     "DEGENERATE": "Edge chain has overlapping points",
 }
 from ..core.polypen_support import bind_view, reset_projection_cache
+from ..core.meshpen_logic import HOVER_PX
 
 NONE = "NONE"
 VERT_EDGE = "VERT_EDGE"
@@ -410,10 +412,21 @@ class PPO_OT_polypen(bpy.types.Operator):
                 self._insert(context)
             elif event.value == "RELEASE" and self.placing:
                 weld = self._weld_candidates(context)
-                targets = merge_moved(context, self.state.bm, weld,
-                            props.settings(context).merge_radius * prefs.ui_scale(context),
-                            adaptive_min=3 * prefs.ui_scale(context) if self.line_placing is not None else None,
-                            keep=[v for v in self.placing[0] if v.is_valid and v not in weld]) or {}
+                keep = [v for v in self.placing[0] if v.is_valid and v not in weld]
+                if context.scene.tool_settings.use_mesh_automerge:
+                    targets = merge_moved(context, self.state.bm, weld,
+                                props.settings(context).merge_radius * prefs.ui_scale(context),
+                                adaptive_min=3 * prefs.ui_scale(context) if self.line_placing is not None else None,
+                                keep=keep) or {}
+                else:   # a drag release acts as a click there: a dragged end joins the vertex under it
+                    ends = self._dragged(context, weld)
+                    if self.line_placing is not None:   # a Ctrl+Wheel line: only its end vertex, never a middle point
+                        ends = [v for v in ends if v is self.placing[0][-1]]
+                    targets = self._release_weld(context, ends,
+                                                 [v for v in self.placing[0] if v.is_valid and v not in ends])
+                    if targets:
+                        self.state.pending_selection = [targets.get(e, e) if isinstance(e, bmesh.types.BMVert)
+                                                        else e for e in self.state.pending_selection]
                 if self.line_placing is not None:
                     endpoint = self.placing[0][-1]
                     endpoint = next((target for source, target in targets.items() if source is endpoint), endpoint)
@@ -527,6 +540,37 @@ class PPO_OT_polypen(bpy.types.Operator):
                     continue
             out.append(v)
         return out
+
+    def _dragged(self, context, weld):
+        """the weld candidates the drag moved more than MOVED_PX on screen from where the click placed them (a
+        plain click welds nothing more than today)."""
+        verts, origins, _start = self.placing
+        limit = MOVED_PX * prefs.ui_scale(context)
+        out = []
+        for v, world in zip(verts, origins):
+            if not v.is_valid or v not in weld:
+                continue
+            a = raycast.to_screen(context, world)
+            b = raycast.to_screen(context, self.state.mw @ v.co)
+            if a is not None and b is not None and (b - a).length > limit:
+                out.append(v)
+        return out
+
+    def _release_weld(self, context, verts, keep):
+        """Auto Merge off: a Build drag release acts as a click at that point. Each end vertex welds to an
+        existing vertex within the click's hover radius (HOVER_PX x UI scale), as a click there would reuse it.
+        Never a pinned vertex; never onto keep (the stroke's start and its own vertices) or a vertex of a face or
+        edge the end vertex is part of (the face being made never collapses); a mirror-plane vertex stays on the
+        plane. Returns the weld map."""
+        st = self.state
+        verts = [v for v in verts if v.is_valid and not pinned(st.bm, v)]
+        if not verts:
+            return {}
+        mates = {u for v in verts for f in v.link_faces for u in f.verts}
+        mates.update(u for v in verts for e in v.link_edges for u in e.verts)
+        return merge_moved(context, st.bm, verts, HOVER_PX * prefs.ui_scale(context),
+                           keep=[v for v in list(keep) + list(mates) if v.is_valid], force=True,
+                           clip=st.clip) or {}
 
     def _line_anchor(self):
         """Only the ordinary one-vertex curve stroke extension owns segment input."""
@@ -765,9 +809,12 @@ class PPO_OT_polypen(bpy.types.Operator):
                 previous = vertex
             st.bm.normal_update()
             bmesh.update_edit_mesh(st.view.obj.data, loop_triangles=True, destructive=True)
-            targets = merge_moved(context, st.bm, created,
-                                 st.scene.merge_radius * prefs.ui_scale(context),
-                                 adaptive_min=3 * prefs.ui_scale(context)) or {}
+            if context.scene.tool_settings.use_mesh_automerge:
+                targets = merge_moved(context, st.bm, created,
+                                     st.scene.merge_radius * prefs.ui_scale(context),
+                                     adaptive_min=3 * prefs.ui_scale(context)) or {}
+            else:   # only the stroke's last vertex, as a click at the release point
+                targets = self._release_weld(context, created[-1:], [self.stroke_vertex] + created[:-1])
             previous = next((target for source, target in targets.items() if source is previous), previous)
             for seq in (st.bm.faces, st.bm.edges, st.bm.verts):
                 for elem in seq:
@@ -835,9 +882,13 @@ class PPO_OT_polypen(bpy.types.Operator):
             st.bm.normal_update()
             bmesh.update_edit_mesh(st.view.obj.data, loop_triangles=True, destructive=True)
             # Only the far pair can weld; internal strip rows remain intact.
-            targets = merge_moved(context, st.bm, previous,
-                st.scene.merge_radius * prefs.ui_scale(context),
-                adaptive_min=3 * prefs.ui_scale(context)) or {}
+            if context.scene.tool_settings.use_mesh_automerge:
+                targets = merge_moved(context, st.bm, previous,
+                    st.scene.merge_radius * prefs.ui_scale(context),
+                    adaptive_min=3 * prefs.ui_scale(context)) or {}
+            else:
+                targets = self._release_weld(context, previous,
+                                             [v for f in made for v in f.verts if v not in previous])
             previous = [targets.get(v, v) for v in previous]
             if (len(set(previous)) != 2 or any(not f.is_valid or len(f.verts) != 4 or f.calc_area() < local_area_epsilon for f in made)):
                 raise ValueError("Merging the far end would collapse the quad strip")
@@ -920,9 +971,13 @@ class PPO_OT_polypen(bpy.types.Operator):
             st.bm.normal_update()
             bmesh.update_edit_mesh(st.view.obj.data, loop_triangles=True, destructive=True)
             # Only the far row can weld; internal strip rows remain intact.
-            targets = merge_moved(context, st.bm, previous,
-                st.scene.merge_radius * prefs.ui_scale(context),
-                adaptive_min=3 * prefs.ui_scale(context)) or {}
+            if context.scene.tool_settings.use_mesh_automerge:
+                targets = merge_moved(context, st.bm, previous,
+                    st.scene.merge_radius * prefs.ui_scale(context),
+                    adaptive_min=3 * prefs.ui_scale(context)) or {}
+            else:
+                targets = self._release_weld(context, previous,
+                                             [v for f in made for v in f.verts if v not in previous])
             previous = [targets.get(v, v) for v in previous]
             far_edges = [st.bm.edges.get((a, b)) for a, b in zip(previous, previous[1:])]
             if (len(set(previous)) != width or any(e is None for e in far_edges)

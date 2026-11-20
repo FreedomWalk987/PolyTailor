@@ -1,23 +1,15 @@
-## 1.1.0-s4b6 (test build)
+## 1.1.0
 
-**Fill (Topo)**
-- On a curved source, the fill now follows the surface's shape and sits closer to it.
-- A hole across a sharp crease of the source can be split along the crease, so each side lies on its own side of the fold. This appears as one more choice and is picked first when it is as good or better.
-- Fill on creased and curved surfaces is faster.
-
-**Topo**
-- Shift+A > Retopology Mesh (Topo) no longer limits snapping to one object: every visible mesh is a source. Sidebar > Sources still lets you pick one.
-
-**Build**
-- While dragging a stroke, moving back along it shortens the strip.
-
-**Sidebar and wheel**
-- The sidebar is reorganized: tool buttons with names, 3D / Topo at the top, Pin and Glue in the main panel, and a new Select Mode section (select modes, Retopo Shading, Merge Radius, Correct Face Attributes, Keep Connected).
-- A small hint shows the W (wheel) and Shift+W (settings) keys. Turn it off in Preferences > Display > Show Wheel Hint.
-- Brush masks read All / Unselected / Selected everywhere.
-
-**Other**
-- Warnings follow Blender's translation settings.
+- Topo Fill: on curved sources the fill is laid out on the source surface, so it follows the shape more closely.
+- Topo Fill: an outline across a sharp crease can be filled in two parts that meet at the crease.
+- Topo Fill: fewer long waits on creased outlines, and "Better result found" can come sooner.
+- Topo Fill: sources with polygons of more than four corners no longer make the fill fold.
+- Fill: the search indicator keeps turning while Fill is still looking for a fill, instead of a warning-colored message.
+- Build: with Auto Merge off, a drag that ends on a vertex joins it, like a click there.
+- Glue: Off releases only the selected part; the rest stays glued.
+- Retopology Mesh (Topo) no longer changes Sidebar > Sources.
+- Sidebar: a two-line hint for the W wheel and Shift+W settings (Preferences > Show Wheel Hint), and a Select Mode section.
+- Slide on Surface (G G) keeps vertices on a clipped mirror center line.
 - Stability fixes.
 
 ## 1.0.5

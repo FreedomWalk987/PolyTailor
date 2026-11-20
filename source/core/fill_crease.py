@@ -923,8 +923,9 @@ def full_steps(crease, settings, rank=None):
 
 
 def _plane_search(crease, settings, rank, floor):
-    """full_steps' loop over the splits: (best fill, the record of its split's 'parts' try) or (None, None). The
-    record is None when that try did not solve all its parts."""
+    """full_steps' loop over the splits: (best fill, record) or (None, None). The record is that of the best's
+    split's 'parts' try when that try solved every part (also when its join failed, and also when the best came
+    from the split's 'panels' try); None otherwise."""
     from . import fill_flow
     best, kept, budget = None, None, dict(left=FULL_SECONDS)
     for pairs in _pair_sets(crease):

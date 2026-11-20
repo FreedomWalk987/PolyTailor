@@ -273,15 +273,28 @@ def adaptive_radius(view, vertex, base, minimum, excluded=()):
     return min(base, max(minimum, 0.4 * nearest))
 
 
-def merge_moved(context, bm, moved, radius, *, adaptive_min=None, keep=()):
+def _same_planes(clip, co, target):
+    """target lies on every clipped mirror plane co is on (MirrorClip.planes: axis, threshold, transform)."""
+    for i, t, transform in clip.planes:
+        a = transform @ co if transform is not None else co
+        b = transform @ target if transform is not None else target
+        if abs(a[i]) <= t and abs(b[i]) > t:
+            return False
+    return True
+
+
+def merge_moved(context, bm, moved, radius, *, adaptive_min=None, keep=(), force=False, clip=None):
     """Weld moved vertices to visible stationary targets; return the weld map. `keep`: vertices that are
-    neither welded nor weld targets (a click's reused, unmoved vertices)."""
-    if not context.scene.tool_settings.use_mesh_automerge:
+    neither welded nor weld targets (a click's reused, unmoved vertices). `force`: weld with Auto Merge off too (a
+    Build drag release that acts as a click); then no two moved vertices weld onto the same target. `clip`: a
+    MirrorClip; a moved vertex on its plane never welds onto a target off the plane."""
+    if not force and not context.scene.tool_settings.use_mesh_automerge:
         return
     view = MeshView(context, lazy=True)
     moved = {v for v in moved if v.is_valid}
     targets = {}
     radii = {}
+    used = set()
     if not moved:
         return
     # numpy narrows the stationary vertices down to those near a moved one on screen
@@ -308,6 +321,10 @@ def merge_moved(context, bm, moved, radius, *, adaptive_min=None, keep=()):
         stationary = [verts[int(i)] for i in np.nonzero(near)[0]]
         nearest, distance = None, radius * radius
         for target in stationary:
+            if force and target in used:
+                continue   # two end vertices on one target would collapse the edge between them
+            if clip is not None and not _same_planes(clip, v.co, target.co):
+                continue   # a mirror-plane vertex stays on each of its planes
             q = view.screen(target)
             if q is None:
                 continue
@@ -319,6 +336,7 @@ def merge_moved(context, bm, moved, radius, *, adaptive_min=None, keep=()):
                 nearest, distance = target, d
         if nearest is not None:
             targets[v] = nearest
+            used.add(nearest)
     if targets:
         bmesh.ops.weld_verts(bm, targetmap=targets)
         bm.normal_update()

@@ -1,3 +1,17 @@
+## 1.1.0
+
+- Topo Fill: on curved sources the fill is laid out on the source surface, so it follows the shape more closely.
+- Topo Fill: an outline across a sharp crease can be filled in two parts that meet at the crease.
+- Topo Fill: fewer long waits on creased outlines, and "Better result found" can come sooner.
+- Topo Fill: sources with polygons of more than four corners no longer make the fill fold.
+- Fill: the search indicator keeps turning while Fill is still looking for a fill, instead of a warning-colored message.
+- Build: with Auto Merge off, a drag that ends on a vertex joins it, like a click there.
+- Glue: Off releases only the selected part; the rest stays glued.
+- Retopology Mesh (Topo) no longer changes Sidebar > Sources.
+- Sidebar: a two-line hint for the W wheel and Shift+W settings (Preferences > Show Wheel Hint), and a Select Mode section.
+- Slide on Surface (G G) keeps vertices on a clipped mirror center line.
+- Stability fixes.
+
 ## 1.0.5
 
 - Fill: the HUD shows whether you are in 3D or Topo mode, and the search indicator is on the left.
