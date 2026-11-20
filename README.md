@@ -5,7 +5,6 @@ PolyTailor is a retopology and mesh-building add-on for Blender's Mesh Edit Mode
 Detailed documentation is in preparation.
 
 - Report bugs and ask questions in [Issues](../../issues).
-- Test builds of the next version are in [Releases](../../releases).
 - Requires Blender 4.5 or newer. Tested on Windows.
 - License: GPL-3.0-or-later.
 - Source code is in [`source/`](source). See the [changelog](CHANGELOG.md) and [roadmap](ROADMAP.md).
