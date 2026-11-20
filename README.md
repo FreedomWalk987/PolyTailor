@@ -20,7 +20,3 @@ PolyTailor is under active development. Current focus:
 - Performance and stability
 
 Ideas and bug reports are welcome in [Issues](../../issues).
-
-## Acknowledgements
-
-PolyTailor's workflow was inspired by RetopoFlow. Thanks to its authors for their work on retopology tools for Blender.
