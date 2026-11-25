@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/b90dc28f-e025-4552-8edf-c915323cca3c
+
 # PolyTailor
 
 PolyTailor is a retopology and mesh-building add-on for Blender's Mesh Edit Mode: Build, Fill, Relax and Tweak on one wheel under **W**.
@@ -13,20 +17,36 @@ Hold Ctrl over an outline to preview the fill, step through the layouts with Ctr
 
 <!-- VIDEO: fill.mp4 -->
 
+https://github.com/user-attachments/assets/5a9f01f6-2f75-45e0-86ad-5968f7a5a2a5
+
+
+
 ### Build
 Hold Ctrl to preview, Ctrl+click to add, drag to move.
 
 <!-- VIDEO: build.mp4 -->
+
+https://github.com/user-attachments/assets/0bd60fc6-f3ce-45be-9b9c-eb690358bdac
+
+
 
 ### Curve stroke and quad strip
 Ctrl+drag draws a curve stroke or sweeps a quad strip.
 
 <!-- VIDEO: drag_build.mp4 -->
 
+https://github.com/user-attachments/assets/5def35b2-c966-44df-8c39-dd13226bcf6a
+
+
+
 ### Relax and Tweak
 Relax evens out the mesh under the brush; Tweak pushes the vertices under it.
 
 <!-- VIDEO: relax_tweak.mp4 -->
+
+https://github.com/user-attachments/assets/ca2f5656-2a8a-4180-b62a-263bd960bbe1
+
+
 
 ### Topology Highlight
 Marks poles, triangles and N-gons, each with its own toggle in the W wheel.
