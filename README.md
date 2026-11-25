@@ -1,6 +1,5 @@
 
 
-https://github.com/user-attachments/assets/b90dc28f-e025-4552-8edf-c915323cca3c
 
 # PolyTailor
 
