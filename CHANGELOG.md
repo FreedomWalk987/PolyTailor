@@ -1,3 +1,21 @@
+## 1.2.0
+
+- Fill: on a curved surface, the fill now follows the surrounding curvature instead of filling flat. A bare outline with no faces around it fills as before.
+- Fill HUD: the mode (Topo or Normal) now leads the title line, with clearer spacing and contrast.
+- Topology Highlight: a new section in the W wheel marks poles, triangles and N-gons on the mesh, each with its own toggle (off by default; shown only while a PolyTailor tool is active).
+- W wheel: opens centred at the cursor above the toolbars, keeping a steady size in small views; it opens faster the first time.
+- W wheel: a Select Box button next to Constraint Tools switches to Blender's Select Box tool.
+- Modes: "3D" is renamed "Normal", and new scenes start in Topo. Topo comes first in the mode buttons and in Shift+A.
+- Build: curve strokes stay on the surface you started on and no longer jump to nearby objects; with Auto Merge on, only the stroke's end merges.
+- Build: after a drag creation, moving the mouse keeps rotating/scaling the new geometry without holding Ctrl; click or Enter to add it.
+- With Tool Keys set to Active Tool, R and S show Blender's rotate and scale handles inside PolyTailor tools.
+- Tweak: back-side vertices of small parts are no longer dragged along.
+- Stability fixes, including drag weld with mirror clipping, keeping your own snap settings when leaving a tool, faster Auto Merge on large meshes, and lower memory use for Alt+Wheel.
+
+## 1.1.1
+
+- Fill: the background search now starts with Blender's Python settings, so it keeps working when another Python version is installed on the system.
+
 ## 1.1.0
 
 - Topo Fill: on curved sources the fill is laid out on the source surface, so it follows the shape more closely.
